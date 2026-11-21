@@ -41,6 +41,8 @@ struct DeviceInfo {
     pair_deadline: Option<Instant>,
     peer_spki: Vec<u8>,
     peer_cert: Vec<u8>,
+    battery_level: Option<i64>,
+    battery_charging: bool,
 }
 
 impl DeviceInfo {
@@ -59,6 +61,8 @@ impl DeviceInfo {
             pair_deadline: None,
             peer_spki: Vec::new(),
             peer_cert: Vec::new(),
+            battery_level: None,
+            battery_charging: false,
         }
     }
 
@@ -72,6 +76,10 @@ impl DeviceInfo {
             "pendingIn": self.pending_in,
             "pendingOut": self.pending_out,
         });
+        if let Some(level) = self.battery_level {
+            v["battery"] = json!(level);
+            v["batteryCharging"] = json!(self.battery_charging);
+        }
         if (self.pending_in || self.pending_out) && !self.peer_spki.is_empty() {
             v["verificationKey"] =
                 json!(identity::verification_key(local_spki, &self.peer_spki));
@@ -104,6 +112,8 @@ struct Inner {
     sftp_mounts: HashMap<String, Vec<PathBuf>>,
     /// Monitor the presenter pointer is pinned to (None = automatic).
     presenter_monitor: Option<String>,
+    /// The phone's own media players: device id -> player -> state.
+    phone_players: HashMap<String, HashMap<String, Value>>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -179,6 +189,13 @@ impl Daemon {
             .values()
             .map(|d| {
                 let mut v = d.to_json(&self.identity.spki_der);
+                if let Some(players) = inner.phone_players.get(&d.id) {
+                    let mut list: Vec<Value> = players.values().cloned().collect();
+                    list.sort_by_key(|p| {
+                        p["player"].as_str().unwrap_or("").to_string()
+                    });
+                    v["phonePlayers"] = json!(list);
+                }
                 let mounts = inner.sftp_mounts.get(&d.id);
                 v["mounted"] = json!(mounts.is_some());
                 v["mountpoints"] = json!(mounts
@@ -474,13 +491,39 @@ impl Daemon {
                 }
             }
             "kdeconnect.mpris" => {
-                // The phone's own players; ground truth for now, the
-                // desktop-side control UI belongs to the app phase.
-                log(&format!(
-                    "mpris state from {}: {}",
-                    device_id,
-                    serde_json::to_string(&packet.body).unwrap_or_default()
-                ));
+                // The phone's own players, kept for the desktop-side
+                // control surface in the app.
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    self.store_phone_player(device_id, &packet.body).await;
+                }
+            }
+            "kdeconnect.battery" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    let level = packet.body["currentCharge"].as_i64();
+                    let charging =
+                        packet.body["isCharging"].as_bool().unwrap_or(false);
+                    let mut inner = self.inner.lock().await;
+                    if let Some(dev) = inner.devices.get_mut(device_id) {
+                        dev.battery_level = level;
+                        dev.battery_charging = charging;
+                    }
+                }
             }
             "kdeconnect.notification" => {
                 let paired = {
@@ -2320,6 +2363,19 @@ impl Daemon {
             .await;
             self.send_sink_list(&device_id).await;
             self.request_sftp(&device_id).await;
+            self.send_packet(
+                &device_id,
+                Packet::new("kdeconnect.battery.request", json!({ "request": true })),
+            )
+            .await;
+            self.send_packet(
+                &device_id,
+                Packet::new(
+                    "kdeconnect.mpris.request",
+                    json!({ "requestPlayerList": true }),
+                ),
+            )
+            .await;
             if let Some(handle) = &self.clipboard {
                 let current = handle.current.lock().unwrap().clone();
                 if let Some(content) = current {
@@ -2778,6 +2834,49 @@ async fn control_task(daemon: Arc<Daemon>, path: PathBuf) {
                     daemon.unmount_sftp(device_id).await;
                     Ok(json!({"ok": true}))
                 }
+                "ring" => {
+                    let sent = daemon
+                        .send_packet(
+                            device_id,
+                            Packet::new("kdeconnect.findmyphone.request", json!({})),
+                        )
+                        .await;
+                    if sent {
+                        Ok(json!({"ok": true}))
+                    } else {
+                        Err(anyhow::anyhow!("device is not connected"))
+                    }
+                }
+                "phone_media" => match (req["player"].as_str(), req["action"].as_str()) {
+                    (Some(player), Some(action)) => {
+                        let sent = daemon
+                            .send_packet(
+                                device_id,
+                                Packet::new(
+                                    "kdeconnect.mpris.request",
+                                    json!({ "player": player, "action": action }),
+                                ),
+                            )
+                            .await;
+                        Ok(json!({"ok": sent}))
+                    }
+                    _ => Err(anyhow::anyhow!("player and action required")),
+                },
+                "phone_volume" => match (req["player"].as_str(), req["volume"].as_i64()) {
+                    (Some(player), Some(volume)) => {
+                        let sent = daemon
+                            .send_packet(
+                                device_id,
+                                Packet::new(
+                                    "kdeconnect.mpris.request",
+                                    json!({ "player": player, "setVolume": volume }),
+                                ),
+                            )
+                            .await;
+                        Ok(json!({"ok": sent}))
+                    }
+                    _ => Err(anyhow::anyhow!("player and volume required")),
+                },
                 "settings" => {
                     let monitor = {
                         let inner = daemon.inner.lock().await;
@@ -2866,6 +2965,7 @@ async fn run_daemon() -> Result<()> {
             sink_applying: std::collections::HashSet::new(),
             sftp_mounts: HashMap::new(),
             presenter_monitor: load_presenter_monitor(&dir),
+            phone_players: HashMap::new(),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
@@ -2958,7 +3058,7 @@ async fn main() -> Result<()> {
         "run" => run_daemon().await,
         "devices" => cli_command(json!({"cmd": "devices"})).await,
         "monitor" => cli_monitor().await,
-        "pair" | "accept" | "reject" | "unpair" | "mount" | "unmount" => {
+        "pair" | "accept" | "reject" | "unpair" | "mount" | "unmount" | "ring" => {
             let device = args.get(1).context("device id required")?;
             cli_command(json!({"cmd": cmd, "deviceId": device})).await
         }
@@ -3202,4 +3302,59 @@ async fn hypr_monitor_names() -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+impl Daemon {
+    /// Merge one kdeconnect.mpris packet from the phone into the
+    /// stored per-player state, and ask for now-playing details of
+    /// players we only know by name so far.
+    async fn store_phone_player(self: &Arc<Self>, device_id: &str, body: &Value) {
+        let mut want_details: Vec<String> = Vec::new();
+        {
+            let mut inner = self.inner.lock().await;
+            let players = inner
+                .phone_players
+                .entry(device_id.to_string())
+                .or_default();
+            if let Some(list) = body["playerList"].as_array() {
+                let names: Vec<String> = list
+                    .iter()
+                    .filter_map(|p| p.as_str().map(|s| s.to_string()))
+                    .collect();
+                players.retain(|name, _| names.contains(name));
+                for name in &names {
+                    if !players.contains_key(name) {
+                        players.insert(name.clone(), json!({ "player": name }));
+                        want_details.push(name.clone());
+                    }
+                }
+            }
+            if let Some(player) = body["player"].as_str() {
+                let entry = players
+                    .entry(player.to_string())
+                    .or_insert_with(|| json!({ "player": player }));
+                if let (Value::Object(dst), Value::Object(src)) =
+                    (&mut *entry, body)
+                {
+                    for (k, v) in src {
+                        dst.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        for player in want_details {
+            self.send_packet(
+                device_id,
+                Packet::new(
+                    "kdeconnect.mpris.request",
+                    json!({
+                        "player": player,
+                        "requestNowPlaying": true,
+                        "requestVolume": true,
+                    }),
+                ),
+            )
+            .await;
+        }
+    }
 }

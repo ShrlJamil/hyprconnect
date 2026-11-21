@@ -286,19 +286,27 @@ fn clear_box(b: &GtkBox) {
     }
 }
 
-fn feature_row(icon: &str, title: &str, subtitle: &str, active: bool) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .title(title)
-        .subtitle(subtitle)
-        .build();
+fn tile(icon: &str, label: &str) -> Button {
+    let b = Button::new();
+    let inner = GtkBox::new(Orientation::Vertical, 6);
+    inner.set_margin_top(12);
+    inner.set_margin_bottom(12);
     let img = Image::from_icon_name(icon);
-    row.add_prefix(&img);
-    let state_label = Label::new(Some(if active { "On" } else { "Off" }));
-    state_label.add_css_class("dim-label");
-    state_label.set_valign(gtk4::Align::Center);
-    row.add_suffix(&state_label);
-    row.set_sensitive(active);
-    row
+    img.set_pixel_size(26);
+    inner.append(&img);
+    let l = Label::new(Some(label));
+    inner.append(&l);
+    b.set_child(Some(&inner));
+    b
+}
+
+fn battery_icon(level: i64, charging: bool) -> String {
+    let step = ((level.clamp(0, 100) + 5) / 10) * 10;
+    if charging {
+        format!("battery-level-{}-charging-symbolic", step)
+    } else {
+        format!("battery-level-{}-symbolic", step)
+    }
 }
 
 fn rebuild_detail(state: &Rc<AppState>) {
@@ -331,16 +339,10 @@ fn rebuild_detail(state: &Rc<AppState>) {
     let pending_out = dev["pendingOut"].as_bool().unwrap_or(false);
     let mounted = dev["mounted"].as_bool().unwrap_or(false);
     let key = dev["verificationKey"].as_str().unwrap_or("").to_string();
-    let mountpoints: Vec<String> = dev["mountpoints"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|m| m.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let battery = dev["battery"].as_i64();
+    let battery_charging = dev["batteryCharging"].as_bool().unwrap_or(false);
 
-    // Header: icon, name, status.
+    // Header: icon, name, status, battery on the right.
     let head = GtkBox::new(Orientation::Horizontal, 14);
     let icon = Image::from_icon_name(device_icon(dtype));
     icon.set_pixel_size(56);
@@ -356,6 +358,24 @@ fn rebuild_detail(state: &Rc<AppState>) {
     status.set_halign(gtk4::Align::Start);
     head_texts.append(&status);
     head.append(&head_texts);
+    if let Some(level) = battery {
+        let spacer = GtkBox::new(Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        head.append(&spacer);
+        let bat = GtkBox::new(Orientation::Horizontal, 6);
+        bat.set_valign(gtk4::Align::Center);
+        let bicon = Image::from_icon_name(&battery_icon(level, battery_charging));
+        bicon.set_pixel_size(22);
+        bat.append(&bicon);
+        let blabel = Label::new(Some(&format!("{}%", level)));
+        bat.append(&blabel);
+        if battery_charging {
+            let ch = Label::new(Some("Charging"));
+            ch.add_css_class("dim-label");
+            bat.append(&ch);
+        }
+        head.append(&bat);
+    }
     state.detail.append(&head);
 
     // Pairing key, while a request is in flight.
@@ -372,139 +392,214 @@ fn rebuild_detail(state: &Rc<AppState>) {
         state.detail.append(&group);
     }
 
-    // Action buttons.
-    let buttons = GtkBox::new(Orientation::Horizontal, 8);
-    if pending_in {
-        let accept = Button::with_label("Accept");
-        accept.add_css_class("suggested-action");
-        let id2 = id.clone();
-        accept.connect_clicked(move |_| send_command("accept", &id2));
-        buttons.append(&accept);
-        let reject = Button::with_label("Reject");
-        let id2 = id.clone();
-        reject.connect_clicked(move |_| send_command("reject", &id2));
-        buttons.append(&reject);
-    } else if pending_out {
-        let cancel = Button::with_label("Cancel request");
-        let id2 = id.clone();
-        cancel.connect_clicked(move |_| send_command("reject", &id2));
-        buttons.append(&cancel);
-    } else if !paired {
-        let pair = Button::with_label("Pair");
-        pair.add_css_class("suggested-action");
-        let id2 = id.clone();
-        pair.connect_clicked(move |_| send_command("pair", &id2));
-        buttons.append(&pair);
-    } else {
-        if connected {
-            let ping = Button::with_label("Ping");
+    // Pairing actions are plain buttons; the control surface below
+    // is for paired devices.
+    if pending_in || pending_out || !paired {
+        let buttons = GtkBox::new(Orientation::Horizontal, 8);
+        if pending_in {
+            let accept = Button::with_label("Accept");
+            accept.add_css_class("suggested-action");
             let id2 = id.clone();
-            ping.connect_clicked(move |_| {
-                send_request(json!({"cmd": "ping", "deviceId": id2, "message": "Ping from HyprConnect"}));
-            });
-            buttons.append(&ping);
-
-            let send = Button::with_label("Send file…");
+            accept.connect_clicked(move |_| send_command("accept", &id2));
+            buttons.append(&accept);
+            let reject = Button::with_label("Reject");
             let id2 = id.clone();
-            let window = state.window.clone();
-            send.connect_clicked(move |_| {
-                let dialog = gtk4::FileDialog::builder()
-                    .title("Send file to phone")
-                    .modal(true)
-                    .build();
-                let id3 = id2.clone();
-                dialog.open(
-                    Some(&window),
-                    None::<&gtk4::gio::Cancellable>,
-                    move |res| {
-                        if let Ok(file) = res {
-                            if let Some(path) = file.path() {
-                                send_request(json!({
-                                    "cmd": "send_file",
-                                    "deviceId": id3,
-                                    "path": path.to_string_lossy(),
-                                }));
-                            }
-                        }
-                    },
-                );
-            });
-            buttons.append(&send);
+            reject.connect_clicked(move |_| send_command("reject", &id2));
+            buttons.append(&reject);
+        } else if pending_out {
+            let cancel = Button::with_label("Cancel request");
+            let id2 = id.clone();
+            cancel.connect_clicked(move |_| send_command("reject", &id2));
+            buttons.append(&cancel);
+        } else {
+            let pair = Button::with_label("Pair");
+            pair.add_css_class("suggested-action");
+            let id2 = id.clone();
+            pair.connect_clicked(move |_| send_command("pair", &id2));
+            buttons.append(&pair);
         }
-        let unpair = Button::with_label("Unpair");
-        let id2 = id.clone();
-        unpair.connect_clicked(move |_| send_command("unpair", &id2));
-        buttons.append(&unpair);
-    }
-    state.detail.append(&buttons);
-
-    if !paired {
+        state.detail.append(&buttons);
         return;
     }
 
-    // Feature list, KDE Connect style.
-    let group = adw::PreferencesGroup::builder().title("Features").build();
-    let live = connected;
-    group.add(&feature_row(
-        "edit-copy-symbolic",
-        "Clipboard sync",
-        "Copy on one device, paste on the other",
-        live,
-    ));
-    group.add(&feature_row(
-        "document-send-symbolic",
-        "File sharing",
-        "Send and receive files",
-        live,
-    ));
-    group.add(&feature_row(
-        "preferences-system-notifications-symbolic",
-        "Notifications",
-        "Phone notifications on this desktop, replies included",
-        live,
-    ));
-    group.add(&feature_row(
-        "media-playback-start-symbolic",
-        "Multimedia control",
-        "Control this desktop's players from the phone",
-        live,
-    ));
-    group.add(&feature_row(
-        "audio-volume-high-symbolic",
-        "System volume",
-        "Desktop sound sinks in the phone's Devices tab",
-        live,
-    ));
+    if !connected {
+        let note = Label::new(Some(
+            "This device is paired but not connected. Controls return when it reconnects.",
+        ));
+        note.add_css_class("dim-label");
+        note.set_halign(gtk4::Align::Start);
+        note.set_wrap(true);
+        state.detail.append(&note);
+        let unpair = Button::with_label("Unpair");
+        unpair.set_halign(gtk4::Align::Start);
+        let id2 = id.clone();
+        unpair.connect_clicked(move |_| send_command("unpair", &id2));
+        state.detail.append(&unpair);
+        return;
+    }
 
-    // SFTP browsing: a real switch bound to the mount state.
-    let sftp_sub = if mounted {
-        mountpoints
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "Mounted".to_string())
-    } else {
-        "Mount the phone storage as a drive".to_string()
-    };
-    let sftp_row = adw::SwitchRow::builder()
-        .title("Browse device storage")
-        .subtitle(&sftp_sub)
-        .build();
-    let sftp_icon = Image::from_icon_name("folder-remote-symbolic");
-    sftp_row.add_prefix(&sftp_icon);
-    sftp_row.set_active(mounted);
-    sftp_row.set_sensitive(connected);
+    // Control tiles: what this desktop can do to the phone.
+    let flow = gtk4::FlowBox::new();
+    flow.set_selection_mode(gtk4::SelectionMode::None);
+    flow.set_homogeneous(true);
+    flow.set_min_children_per_line(2);
+    flow.set_max_children_per_line(4);
+    flow.set_column_spacing(8);
+    flow.set_row_spacing(8);
+
+    let ping = tile("dialog-information-symbolic", "Ping");
     {
         let id2 = id.clone();
-        sftp_row.connect_active_notify(move |row| {
-            let want = row.is_active();
-            if want != mounted {
-                send_command(if want { "mount" } else { "unmount" }, &id2);
-            }
+        ping.connect_clicked(move |_| {
+            send_request(json!({"cmd": "ping", "deviceId": id2, "message": "Ping from HyprConnect"}));
         });
     }
-    group.add(&sftp_row);
+    flow.append(&ping);
 
-    // Presentation remote: monitor picker as a combo row.
+    let send = tile("document-send-symbolic", "Send file…");
+    {
+        let id2 = id.clone();
+        let window = state.window.clone();
+        send.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::builder()
+                .title("Send file to phone")
+                .modal(true)
+                .build();
+            let id3 = id2.clone();
+            dialog.open(
+                Some(&window),
+                None::<&gtk4::gio::Cancellable>,
+                move |res| {
+                    if let Ok(file) = res {
+                        if let Some(path) = file.path() {
+                            send_request(json!({
+                                "cmd": "send_file",
+                                "deviceId": id3,
+                                "path": path.to_string_lossy(),
+                            }));
+                        }
+                    }
+                },
+            );
+        });
+    }
+    flow.append(&send);
+
+    let storage = tile(
+        "folder-remote-symbolic",
+        if mounted { "Unmount storage" } else { "Mount storage" },
+    );
+    {
+        let id2 = id.clone();
+        storage.connect_clicked(move |_| {
+            send_command(if mounted { "unmount" } else { "mount" }, &id2);
+        });
+    }
+    flow.append(&storage);
+
+    let ring = tile("alarm-symbolic", "Ring phone");
+    {
+        let id2 = id.clone();
+        ring.connect_clicked(move |_| send_command("ring", &id2));
+    }
+    flow.append(&ring);
+
+    state.detail.append(&flow);
+
+    // Media playing on the phone, controlled from here.
+    let players = dev["phonePlayers"].as_array().cloned().unwrap_or_default();
+    let players: Vec<&Value> = players
+        .iter()
+        .filter(|p| p["title"].as_str().map(|t| !t.is_empty()).unwrap_or(false))
+        .collect();
+    if !players.is_empty() {
+        let group = adw::PreferencesGroup::builder()
+            .title("Playing on the phone")
+            .build();
+        for p in players {
+            let player = p["player"].as_str().unwrap_or("").to_string();
+            let title = p["title"].as_str().unwrap_or("");
+            let artist = p["artist"].as_str().unwrap_or("");
+            let is_playing = p["isPlaying"].as_bool().unwrap_or(false);
+            let volume = p["volume"].as_i64().unwrap_or(0);
+
+            let card = GtkBox::new(Orientation::Vertical, 6);
+            card.set_margin_top(8);
+            card.set_margin_bottom(8);
+            card.set_margin_start(10);
+            card.set_margin_end(10);
+            let heading = format!(
+                "{}{}{}",
+                title,
+                if artist.is_empty() { "" } else { " — " },
+                artist
+            );
+            let title_label = Label::new(Some(&heading));
+            title_label.set_halign(gtk4::Align::Start);
+            title_label.set_wrap(true);
+            card.append(&title_label);
+            let player_label = Label::new(Some(&player));
+            player_label.add_css_class("dim-label");
+            player_label.set_halign(gtk4::Align::Start);
+            card.append(&player_label);
+
+            let controls = GtkBox::new(Orientation::Horizontal, 6);
+            let prev = Button::from_icon_name("media-skip-backward-symbolic");
+            {
+                let id2 = id.clone();
+                let pl = player.clone();
+                prev.connect_clicked(move |_| {
+                    send_request(json!({"cmd": "phone_media", "deviceId": id2, "player": pl, "action": "Previous"}));
+                });
+            }
+            controls.append(&prev);
+            let playpause = Button::from_icon_name(if is_playing {
+                "media-playback-pause-symbolic"
+            } else {
+                "media-playback-start-symbolic"
+            });
+            {
+                let id2 = id.clone();
+                let pl = player.clone();
+                playpause.connect_clicked(move |_| {
+                    send_request(json!({"cmd": "phone_media", "deviceId": id2, "player": pl, "action": "PlayPause"}));
+                });
+            }
+            controls.append(&playpause);
+            let next = Button::from_icon_name("media-skip-forward-symbolic");
+            {
+                let id2 = id.clone();
+                let pl = player.clone();
+                next.connect_clicked(move |_| {
+                    send_request(json!({"cmd": "phone_media", "deviceId": id2, "player": pl, "action": "Next"}));
+                });
+            }
+            controls.append(&next);
+
+            let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 100.0, 1.0);
+            scale.set_value(volume as f64);
+            scale.set_hexpand(true);
+            scale.set_draw_value(false);
+            {
+                let id2 = id.clone();
+                let pl = player.clone();
+                let last = std::rc::Rc::new(std::cell::Cell::new(volume));
+                scale.connect_value_changed(move |s| {
+                    let v = s.value().round() as i64;
+                    if v != last.get() {
+                        last.set(v);
+                        send_request(json!({"cmd": "phone_volume", "deviceId": id2, "player": pl, "volume": v}));
+                    }
+                });
+            }
+            controls.append(&scale);
+            card.append(&controls);
+            group.add(&card);
+        }
+        state.detail.append(&group);
+    }
+
+    // Presentation pointer target (desktop side of the presenter).
     let monitors = state.monitors.borrow().clone();
     let current_monitor = state.presenter_monitor.borrow().clone();
     let model = gtk4::StringList::new(&[] as &[&str]);
@@ -516,9 +611,12 @@ fn rebuild_detail(state: &Rc<AppState>) {
             selected_idx = (i + 1) as u32;
         }
     }
+    let pres_group = adw::PreferencesGroup::builder()
+        .title("Presentation")
+        .build();
     let pres_row = adw::ComboRow::builder()
-        .title("Presentation remote")
-        .subtitle("Monitor the pointer appears on")
+        .title("Pointer monitor")
+        .subtitle("Where the presenter pointer appears")
         .model(&model)
         .build();
     let pres_icon = Image::from_icon_name("video-display-symbolic");
@@ -536,7 +634,12 @@ fn rebuild_detail(state: &Rc<AppState>) {
         };
         send_request(json!({"cmd": "set_presenter_monitor", "monitor": value}));
     });
-    group.add(&pres_row);
+    pres_group.add(&pres_row);
+    state.detail.append(&pres_group);
 
-    state.detail.append(&group);
+    let unpair = Button::with_label("Unpair");
+    unpair.set_halign(gtk4::Align::Start);
+    let id2 = id.clone();
+    unpair.connect_clicked(move |_| send_command("unpair", &id2));
+    state.detail.append(&unpair);
 }

@@ -36,6 +36,7 @@ pub const INCOMING_CAPABILITIES: &[&str] = &[
     "kdeconnect.systemvolume.request",
     "kdeconnect.sftp",
     "kdeconnect.presenter",
+    "kdeconnect.battery",
 ];
 pub const OUTGOING_CAPABILITIES: &[&str] = &[
     "kdeconnect.ping",
@@ -49,6 +50,8 @@ pub const OUTGOING_CAPABILITIES: &[&str] = &[
     "kdeconnect.mpris.request",
     "kdeconnect.systemvolume",
     "kdeconnect.sftp.request",
+    "kdeconnect.battery.request",
+    "kdeconnect.findmyphone.request",
 ];
 
 pub fn now_ms() -> i64 {

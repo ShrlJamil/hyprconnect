@@ -11,9 +11,9 @@ that is not needed day to day, without pulling in any KDE or Qt stack.
 
 Early development, built in phases. Discovery, TLS transport and
 pairing (phase 0), clipboard sync (phase 1) and file sharing
-(phase 2) are implemented and verified against the official Android
-app on a real phone. Notifications, MPRIS, SFTP and the presentation
-remote follow.
+(phase 2) and notification mirroring (phase 3) are implemented and
+verified against the official Android app on a real phone. MPRIS,
+SFTP and the presentation remote follow.
 
 ## Planned features
 

@@ -30,12 +30,16 @@ pub const INCOMING_CAPABILITIES: &[&str] = &[
     "kdeconnect.clipboard",
     "kdeconnect.clipboard.connect",
     "kdeconnect.share.request",
+    "kdeconnect.notification",
 ];
 pub const OUTGOING_CAPABILITIES: &[&str] = &[
     "kdeconnect.ping",
     "kdeconnect.clipboard",
     "kdeconnect.clipboard.connect",
     "kdeconnect.share.request",
+    "kdeconnect.notification.request",
+    "kdeconnect.notification.reply",
+    "kdeconnect.notification.action",
 ];
 
 pub fn now_ms() -> i64 {

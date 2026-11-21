@@ -86,6 +86,8 @@ struct Inner {
     connecting: HashSet<String>,
     trust: TrustStore,
     subscribers: Vec<mpsc::Sender<String>>,
+    /// Phone notification id -> desktop notification id.
+    notif_ids: HashMap<String, u32>,
 }
 
 struct Daemon {
@@ -95,6 +97,7 @@ struct Daemon {
     inner: Mutex<Inner>,
     clipboard: Option<clipboard::ClipboardHandle>,
     last_clipboard: Mutex<Option<String>>,
+    dbus: Mutex<Option<zbus::Connection>>,
 }
 
 fn log(msg: &str) {
@@ -341,6 +344,19 @@ impl Daemon {
                         "message": message,
                     }))
                     .await;
+                }
+            }
+            "kdeconnect.notification" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    self.handle_notification(device_id, &packet).await;
                 }
             }
             "kdeconnect.share.request" => {
@@ -665,6 +681,165 @@ impl Daemon {
         Ok(())
     }
 
+    async fn notify_conn(&self) -> Result<zbus::Connection> {
+        let mut slot = self.dbus.lock().await;
+        if let Some(conn) = slot.as_ref() {
+            return Ok(conn.clone());
+        }
+        let conn = zbus::Connection::session()
+            .await
+            .context("connect to the session D-Bus")?;
+        *slot = Some(conn.clone());
+        Ok(conn)
+    }
+
+    /// A kdeconnect.notification arrived from a paired device: mirror
+    /// it to the desktop notification server, and mirror dismissals
+    /// the same way. Icons arrive as packet payloads.
+    async fn handle_notification(self: &Arc<Self>, device_id: &str, packet: &Packet) {
+        log(&format!(
+            "notification from {}: {}",
+            device_id,
+            serde_json::to_string(packet).unwrap_or_default()
+        ));
+        let body = &packet.body;
+        let notif_id = body
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if notif_id.is_empty() {
+            return;
+        }
+        if body.get("isCancel").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let desktop_id = {
+                let mut inner = self.inner.lock().await;
+                inner.notif_ids.remove(&notif_id)
+            };
+            if let Some(desktop_id) = desktop_id {
+                if let Ok(conn) = self.notify_conn().await {
+                    if let Ok(proxy) = NotificationsProxy::new(&conn).await {
+                        let _ = proxy.close_notification(desktop_id).await;
+                    }
+                }
+                log(&format!("notification {} dismissed on the phone, closed on desktop", notif_id));
+            }
+            return;
+        }
+        if body.get("silent").and_then(|v| v.as_bool()).unwrap_or(false) {
+            log(&format!("notification {} is silent, not showing", notif_id));
+            return;
+        }
+        // Icon payload, if any: same payload channel rules as files.
+        let mut icon_path = String::new();
+        if let (Some(info), Some(size)) = (&packet.payload_transfer_info, packet.payload_size) {
+            if size > 0 && size <= 2_000_000 {
+                if let Some(port) = info.get("port").and_then(|p| p.as_u64()) {
+                    match self
+                        .download_payload(device_id, port as u16, size as usize)
+                        .await
+                    {
+                        Ok(bytes) => {
+                            let safe: String = notif_id
+                                .chars()
+                                .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                                .collect();
+                            let dir = self.state.join("icons");
+                            let _ = tokio::fs::create_dir_all(&dir).await;
+                            let path = dir.join(format!("{}.png", safe));
+                            if tokio::fs::write(&path, &bytes).await.is_ok() {
+                                icon_path = path.to_string_lossy().to_string();
+                            }
+                        }
+                        Err(e) => {
+                            log(&format!("notification icon download failed: {:#}", e))
+                        }
+                    }
+                }
+            }
+        }
+        let app_name = body.get("appName").and_then(|v| v.as_str()).unwrap_or("Phone");
+        let title = body.get("title").and_then(|v| v.as_str()).unwrap_or("");
+        let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        let (summary, body_text) = if title.is_empty() {
+            (app_name.to_string(), text.to_string())
+        } else {
+            (title.to_string(), text.to_string())
+        };
+        let replaces = {
+            let inner = self.inner.lock().await;
+            inner.notif_ids.get(&notif_id).copied().unwrap_or(0)
+        };
+        match self.notify_conn().await {
+            Ok(conn) => match NotificationsProxy::new(&conn).await {
+                Ok(proxy) => {
+                    match proxy
+                        .notify(
+                            app_name,
+                            replaces,
+                            &icon_path,
+                            &summary,
+                            &body_text,
+                            Vec::new(),
+                            HashMap::new(),
+                            -1,
+                        )
+                        .await
+                    {
+                        Ok(desktop_id) => {
+                            let mut inner = self.inner.lock().await;
+                            inner.notif_ids.insert(notif_id.clone(), desktop_id);
+                            log(&format!(
+                                "notification {} shown on desktop as {}",
+                                notif_id, desktop_id
+                            ));
+                        }
+                        Err(e) => log(&format!("Notify call failed: {:#}", e)),
+                    }
+                }
+                Err(e) => log(&format!("notification proxy failed: {:#}", e)),
+            },
+            Err(e) => log(&format!("no session D-Bus for notifications: {:#}", e)),
+        }
+    }
+
+    /// Fetch a small payload (a notification icon) into memory.
+    async fn download_payload(
+        &self,
+        device_id: &str,
+        port: u16,
+        size: usize,
+    ) -> Result<Vec<u8>> {
+        let ip = {
+            let inner = self.inner.lock().await;
+            inner
+                .devices
+                .get(device_id)
+                .and_then(|d| d.last_ip)
+                .context("device address unknown")?
+        };
+        let tcp = TcpStream::connect((ip, port))
+            .await
+            .context("payload connect")?;
+        let (mut stream, peer_cert) =
+            tls::handshake_as_client(tcp, &self.identity, device_id).await?;
+        let (cn, _) = identity::cert_info(&peer_cert)?;
+        if cn != device_id {
+            anyhow::bail!("payload peer CN {} is not {}", cn, device_id);
+        }
+        let mut data = Vec::with_capacity(size);
+        let mut buf = vec![0u8; 16 * 1024];
+        while data.len() < size {
+            let want = (size - data.len()).min(buf.len());
+            let n = stream.read(&mut buf[..want]).await?;
+            if n == 0 {
+                anyhow::bail!("payload ended early");
+            }
+            data.extend_from_slice(&buf[..n]);
+        }
+        Ok(data)
+    }
+
     // ---- connection lifecycle ----------------------------------------------
 
     async fn register_channel(
@@ -722,6 +897,14 @@ impl Daemon {
                 .unwrap_or(false)
         };
         if is_paired {
+            self.send_packet(
+                &device_id,
+                Packet::new(
+                    "kdeconnect.notification.request",
+                    json!({ "request": true }),
+                ),
+            )
+            .await;
             if let Some(handle) = &self.clipboard {
                 let current = handle.current.lock().unwrap().clone();
                 if let Some(content) = current {
@@ -1225,9 +1408,11 @@ async fn run_daemon() -> Result<()> {
             connecting: HashSet::new(),
             trust,
             subscribers: Vec::new(),
+            notif_ids: HashMap::new(),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
+        dbus: Mutex::new(None),
     });
 
     log(&format!(
@@ -1364,4 +1549,24 @@ fn unique_download_path(filename: &str) -> PathBuf {
         }
     }
     candidate
+}
+
+#[zbus::proxy(
+    interface = "org.freedesktop.Notifications",
+    default_service = "org.freedesktop.Notifications",
+    default_path = "/org/freedesktop/Notifications"
+)]
+trait Notifications {
+    fn notify(
+        &self,
+        app_name: &str,
+        replaces_id: u32,
+        app_icon: &str,
+        summary: &str,
+        body: &str,
+        actions: Vec<&str>,
+        hints: HashMap<&str, zbus::zvariant::Value<'_>>,
+        expire_timeout: i32,
+    ) -> zbus::Result<u32>;
+    fn close_notification(&self, id: u32) -> zbus::Result<()>;
 }

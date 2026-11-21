@@ -1389,6 +1389,52 @@ impl Daemon {
             serde_json::to_string(packet).unwrap_or_default()
         ));
         let body = &packet.body;
+        // Album art is a pull protocol: the phone asks for a specific
+        // art URL, and only a packet flagged transferringAlbumArt with
+        // the file as payload answers it. Pushing art on state packets
+        // is silently dropped by the phone (its TLS handshake for the
+        // payload never starts, which looks like an EOF on our side).
+        if let Some(url) = body.get("albumArtUrl").and_then(|v| v.as_str()) {
+            let player_name = body
+                .get("player")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let current = {
+                let inner = self.inner.lock().await;
+                inner
+                    .mpris_players
+                    .get(&player_name)
+                    .map(|p| p.art_url.clone())
+            };
+            if current.as_deref() == Some(url) {
+                if let Some(path) = url.strip_prefix("file://") {
+                    let answer = Packet::new(
+                        "kdeconnect.mpris",
+                        json!({
+                            "transferringAlbumArt": true,
+                            "player": player_name,
+                            "albumArtUrl": url,
+                        }),
+                    );
+                    if self
+                        .send_packet_with_file_payload(device_id, answer, path, None)
+                        .await
+                    {
+                        log(&format!(
+                            "album art for {} requested and offered: {}",
+                            player_name, url
+                        ));
+                    }
+                }
+            } else {
+                log(&format!(
+                    "album art request for {} does not match current art, ignored",
+                    player_name
+                ));
+            }
+            return;
+        }
         if body
             .get("requestPlayerList")
             .and_then(|v| v.as_bool())
@@ -1451,7 +1497,9 @@ impl Daemon {
                 .await;
         }
         if let Some(seek) = body.get("Seek").and_then(|v| v.as_i64()) {
-            let _ = proxy.call::<&str, _, ()>("Seek", &(seek * 1000,)).await;
+            // The phone sends MPRIS-native microseconds (a 10 second
+            // jump arrives as 10000000), so pass it through untouched.
+            let _ = proxy.call::<&str, _, ()>("Seek", &seek).await;
         }
         if let Some(pos) = body.get("SetPosition").and_then(|v| v.as_i64()) {
             let track = {
@@ -1464,7 +1512,7 @@ impl Daemon {
             };
             if let Ok(path) = zbus::zvariant::ObjectPath::try_from(track) {
                 let _ = proxy
-                    .call::<&str, _, ()>("SetPosition", &(path, pos * 1000))
+                    .call::<&str, _, ()>("SetPosition", &(path, pos))
                     .await;
             }
         }
@@ -1531,7 +1579,8 @@ impl Daemon {
         tokio::spawn(async move {
             let mut failed = false;
             match tokio::time::timeout(Duration::from_secs(120), listener.accept()).await {
-                Ok(Ok((tcp, _))) => {
+                Ok(Ok((tcp, addr))) => {
+                    log(&format!("payload fetch of {} from {}", path, addr));
                     if let Err(e) = daemon.stream_file(&device_id, tcp, &path).await {
                         log(&format!("payload stream {} failed: {:#}", path, e));
                         failed = true;
@@ -1559,38 +1608,11 @@ impl Daemon {
         true
     }
 
-    /// Send one player's state, attaching the album art as payload
-    /// when the track's art file changed since the last send.
+    /// Send one player's state. Album art is NOT attached here: the
+    /// phone pulls it separately (see handle_mpris_request).
     async fn send_mpris_state(self: &Arc<Self>, device_id: &str, player: &MprisPlayer, pos_ms: i64) {
-        let packet = mpris_state_packet(player, pos_ms);
-        if let Some(path) = player.art_url.strip_prefix("file://") {
-            let changed = {
-                let mut inner = self.inner.lock().await;
-                if inner.mpris_art_sent.get(&player.name).map(|s| s.as_str())
-                    != Some(path)
-                {
-                    inner
-                        .mpris_art_sent
-                        .insert(player.name.clone(), path.to_string());
-                    true
-                } else {
-                    false
-                }
-            };
-            if changed
-                && self
-                    .send_packet_with_file_payload(
-                        device_id,
-                        packet.clone(),
-                        path,
-                        Some(player.name.clone()),
-                    )
-                    .await
-            {
-                return;
-            }
-        }
-        self.send_packet(device_id, packet).await;
+        self.send_packet(device_id, mpris_state_packet(player, pos_ms))
+            .await;
     }
 
     // ---- system volume (PulseAudio via pactl) --------------------------------
@@ -2678,6 +2700,10 @@ fn ov_i64(v: &zbus::zvariant::OwnedValue) -> i64 {
 }
 
 fn mpris_state_packet(player: &MprisPlayer, pos_ms: i64) -> Packet {
+    // Field set mirrors what the Android app itself sends for its own
+    // players (captured live): albumArtUrl must be present for the
+    // phone to claim the art payload, and nowPlaying, canFastForward
+    // and canRewind complete the shape it parses.
     Packet::new(
         "kdeconnect.mpris",
         json!({
@@ -2685,6 +2711,9 @@ fn mpris_state_packet(player: &MprisPlayer, pos_ms: i64) -> Packet {
             "title": player.title,
             "artist": player.artist,
             "album": player.album,
+            "albumArtUrl": player.art_url,
+            "supportAlbumArtPayload": true,
+            "nowPlaying": player.title,
             "isPlaying": player.is_playing,
             "pos": pos_ms,
             "length": player.length_ms,
@@ -2693,6 +2722,8 @@ fn mpris_state_packet(player: &MprisPlayer, pos_ms: i64) -> Packet {
             "canGoNext": player.can_next,
             "canGoPrevious": player.can_prev,
             "canSeek": player.can_seek,
+            "canFastForward": player.can_seek,
+            "canRewind": player.can_seek,
             "volume": player.volume,
         }),
     )

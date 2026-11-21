@@ -9,9 +9,11 @@ that is not needed day to day, without pulling in any KDE or Qt stack.
 
 ## Status
 
-Early development. The feature set and architecture are settled; the
-implementation is being built in phases, starting with discovery, TLS
-transport, and pairing.
+Early development, built in phases. Discovery, TLS transport and
+pairing (phase 0), clipboard sync (phase 1) and file sharing
+(phase 2) are implemented and verified against the official Android
+app on a real phone. Notifications, MPRIS, SFTP and the presentation
+remote follow.
 
 ## Planned features
 

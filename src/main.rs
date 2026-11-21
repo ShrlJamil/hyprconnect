@@ -100,6 +100,8 @@ struct Inner {
     sink_pending: HashMap<String, i64>,
     /// Sinks with a volume-apply worker currently running.
     sink_applying: std::collections::HashSet<String>,
+    /// Active SFTP mounts: device id -> mountpoints (primary first).
+    sftp_mounts: HashMap<String, Vec<PathBuf>>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -391,6 +393,44 @@ impl Daemon {
                         "message": message,
                     }))
                     .await;
+                }
+            }
+            "kdeconnect.presenter" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    log(&format!(
+                        "presenter from {}: {}",
+                        device_id,
+                        serde_json::to_string(&packet.body).unwrap_or_default()
+                    ));
+                }
+            }
+            "kdeconnect.sftp" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                log(&format!(
+                    "sftp params from {}: {}",
+                    device_id,
+                    serde_json::to_string(&packet.body).unwrap_or_default()
+                ));
+                if paired {
+                    let d = self.clone();
+                    let id = device_id.to_string();
+                    let body = packet.body.clone();
+                    tokio::spawn(async move { d.mount_sftp(&id, &body).await });
                 }
             }
             "kdeconnect.systemvolume.request" => {
@@ -1907,6 +1947,290 @@ impl Daemon {
         }
     }
 
+    // ---- SFTP browsing (sshfs mount) -----------------------------------------
+
+    async fn request_sftp(&self, device_id: &str) {
+        self.send_packet(
+            device_id,
+            Packet::new(
+                "kdeconnect.sftp.request",
+                json!({ "startBrowsing": true }),
+            ),
+        )
+        .await;
+    }
+
+    async fn mount_sftp(self: &Arc<Self>, device_id: &str, body: &Value) {
+        if body["serverRunning"].as_bool() == Some(false) {
+            log(&format!(
+                "sftp server on {} is not running (yet), waiting for parameters",
+                device_id
+            ));
+            return;
+        }
+        {
+            let existing = {
+                let inner = self.inner.lock().await;
+                inner.sftp_mounts.get(device_id).cloned()
+            };
+            if let Some(mounts) = existing {
+                if let Some(first) = mounts.first() {
+                    if mount_serves(first).await {
+                        return; // still alive, nothing to do
+                    }
+                }
+                log(&format!(
+                    "recorded sftp mount for {} no longer serves, remounting",
+                    device_id
+                ));
+                self.unmount_sftp(device_id).await;
+            }
+        }
+        let (Some(ip), Some(port), Some(user), Some(password)) = (
+            body["ip"].as_str(),
+            body["port"].as_i64(),
+            body["user"].as_str(),
+            body["password"].as_str(),
+        ) else {
+            log(&format!(
+                "sftp params from {} incomplete: {}",
+                device_id,
+                serde_json::to_string(body).unwrap_or_default()
+            ));
+            return;
+        };
+        // The phone names its own storages, so nothing is hardcoded:
+        // "path" is the primary storage, multiPaths/pathNames list
+        // every storage (an SD card shows up as an extra entry).
+        let multi: Vec<String> = body["multiPaths"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let names: Vec<String> = body["pathNames"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let primary = body["path"]
+            .as_str()
+            .map(|s| s.to_string())
+            .or_else(|| multi.first().cloned())
+            .unwrap_or_else(|| "/".to_string());
+        let mut storages: Vec<(String, Option<String>)> = vec![(primary.clone(), None)];
+        for (i, p) in multi.iter().enumerate() {
+            if *p != primary {
+                storages.push((p.clone(), names.get(i).cloned()));
+            }
+        }
+        let dev_name = {
+            let inner = self.inner.lock().await;
+            inner
+                .devices
+                .get(device_id)
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| device_id.to_string())
+        };
+        let base = sftp_mountpoint(&dev_name, device_id);
+        let mut mounted: Vec<PathBuf> = Vec::new();
+        for (remote, label) in &storages {
+            let mountpoint = match label {
+                Some(name) => {
+                    let suffix: String = name
+                        .trim()
+                        .chars()
+                        .map(|c| {
+                            if c == '/' || c.is_control() {
+                                '_'
+                            } else {
+                                c
+                            }
+                        })
+                        .collect();
+                    base.with_file_name(format!(
+                        "{} ({})",
+                        base.file_name().unwrap_or_default().to_string_lossy(),
+                        suffix
+                    ))
+                }
+                None => base.clone(),
+            };
+            if self
+                .mount_one(device_id, user, ip, port, password, remote, &mountpoint)
+                .await
+            {
+                mounted.push(mountpoint);
+            }
+        }
+        if mounted.is_empty() {
+            return;
+        }
+        {
+            let mut inner = self.inner.lock().await;
+            inner
+                .sftp_mounts
+                .insert(device_id.to_string(), mounted.clone());
+        }
+        self.emit(json!({
+            "event": "sftp_mounted",
+            "deviceId": device_id,
+            "mountpoints": mounted
+                .iter()
+                .map(|m| m.to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
+        }))
+        .await;
+    }
+
+    async fn mount_one(
+        &self,
+        device_id: &str,
+        user: &str,
+        ip: &str,
+        port: i64,
+        password: &str,
+        remote_path: &str,
+        mountpoint: &std::path::Path,
+    ) -> bool {
+        // Clear a stale mount left by an earlier life FIRST: a dead
+        // FUSE mount answers create_dir_all with EEXIST and blocks
+        // the remount (seen live 2026-11-21).
+        if mount_is_active(mountpoint).await {
+            let _ = tokio::process::Command::new("fusermount3")
+                .args(["-uz", &mountpoint.to_string_lossy()])
+                .output()
+                .await;
+        }
+        if let Err(e) = tokio::fs::create_dir_all(mountpoint).await {
+            log(&format!("sftp mountpoint create failed: {:#}", e));
+            return false;
+        }
+        log(&format!(
+            "mounting {} at {} ({}@{}:{}{})",
+            device_id,
+            mountpoint.display(),
+            user,
+            ip,
+            port,
+            remote_path
+        ));
+        let mut cmd = tokio::process::Command::new("sshfs");
+        cmd.args([
+            "-o",
+            "password_stdin",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
+            "-o",
+            "reconnect",
+            "-o",
+            "idmap=user",
+            "-p",
+            &port.to_string(),
+            &format!("{}@{}:{}", user, ip, remote_path),
+            &mountpoint.to_string_lossy(),
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                log(&format!("sshfs spawn failed: {:#}", e));
+                return false;
+            }
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            let _ = stdin
+                .write_all(format!("{}\n", password).as_bytes())
+                .await;
+            let _ = stdin.shutdown().await;
+        }
+        let status = match child.wait().await {
+            Ok(s) => s,
+            Err(e) => {
+                log(&format!("sshfs wait failed: {:#}", e));
+                return false;
+            }
+        };
+        if !status.success() {
+            log(&format!("sshfs exited with {}", status));
+            return false;
+        }
+        // Verify the mount actually serves content.
+        match tokio::fs::read_dir(mountpoint).await {
+            Ok(mut rd) => {
+                let mut entries = Vec::new();
+                while let Ok(Some(e)) = rd.next_entry().await {
+                    entries.push(e.file_name().to_string_lossy().to_string());
+                    if entries.len() >= 12 {
+                        break;
+                    }
+                }
+                log(&format!(
+                    "sftp mounted at {}: {}",
+                    mountpoint.display(),
+                    entries.join(", ")
+                ));
+                true
+            }
+            Err(e) => {
+                log(&format!(
+                    "sftp mount at {} does not read: {:#}",
+                    mountpoint.display(),
+                    e
+                ));
+                false
+            }
+        }
+    }
+
+    async fn unmount_sftp(&self, device_id: &str) {
+        let mountpoints = {
+            let mut inner = self.inner.lock().await;
+            inner.sftp_mounts.remove(device_id)
+        };
+        let Some(mountpoints) = mountpoints else {
+            return;
+        };
+        for mountpoint in &mountpoints {
+            let mp = mountpoint.to_string_lossy().to_string();
+            let out = tokio::process::Command::new("fusermount3")
+                .args(["-u", &mp])
+                .output()
+                .await;
+            let ok = matches!(out, Ok(o) if o.status.success());
+            if !ok {
+                let _ = tokio::process::Command::new("fusermount3")
+                    .args(["-uz", &mp])
+                    .output()
+                    .await;
+            }
+            log(&format!("sftp unmounted {}", mp));
+        }
+        self.emit(json!({
+            "event": "sftp_unmounted",
+            "deviceId": device_id,
+            "mountpoints": mountpoints
+                .iter()
+                .map(|m| m.to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
+        }))
+        .await;
+    }
+
     // ---- connection lifecycle ----------------------------------------------
 
     async fn register_channel(
@@ -1982,6 +2306,7 @@ impl Daemon {
             )
             .await;
             self.send_sink_list(&device_id).await;
+            self.request_sftp(&device_id).await;
             if let Some(handle) = &self.clipboard {
                 let current = handle.current.lock().unwrap().clone();
                 if let Some(content) = current {
@@ -2060,6 +2385,7 @@ impl Daemon {
             inner.channels.remove(&read_id);
             drop(inner);
             log(&format!("disconnected from {}", read_id));
+            daemon.unmount_sftp(&read_id).await;
             daemon
                 .emit(json!({"event": "disconnected", "deviceId": read_id}))
                 .await;
@@ -2431,6 +2757,14 @@ async fn control_task(daemon: Arc<Daemon>, path: PathBuf) {
                         Err(anyhow::anyhow!("device is not connected"))
                     }
                 }
+                "mount" => {
+                    daemon.request_sftp(device_id).await;
+                    Ok(json!({"ok": true}))
+                }
+                "unmount" => {
+                    daemon.unmount_sftp(device_id).await;
+                    Ok(json!({"ok": true}))
+                }
                 "send_file" => match req["path"].as_str() {
                     Some(path) => daemon.send_file(device_id, path).await,
                     None => Err(anyhow::anyhow!("path required")),
@@ -2492,6 +2826,7 @@ async fn run_daemon() -> Result<()> {
             sinks: Vec::new(),
             sink_pending: HashMap::new(),
             sink_applying: std::collections::HashSet::new(),
+            sftp_mounts: HashMap::new(),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
@@ -2584,7 +2919,7 @@ async fn main() -> Result<()> {
         "run" => run_daemon().await,
         "devices" => cli_command(json!({"cmd": "devices"})).await,
         "monitor" => cli_monitor().await,
-        "pair" | "accept" | "reject" | "unpair" => {
+        "pair" | "accept" | "reject" | "unpair" | "mount" | "unmount" => {
             let device = args.get(1).context("device id required")?;
             cli_command(json!({"cmd": cmd, "deviceId": device})).await
         }
@@ -2603,7 +2938,7 @@ async fn main() -> Result<()> {
         }
         other => {
             eprintln!("unknown command: {}", other);
-            eprintln!("usage: hyprconnect [run|devices|monitor|pair|accept|reject|unpair|ping|send] [deviceId] [path]");
+            eprintln!("usage: hyprconnect [run|devices|monitor|pair|accept|reject|unpair|mount|unmount|ping|send] [deviceId] [path]");
             std::process::exit(2);
         }
     }
@@ -2727,4 +3062,50 @@ fn mpris_state_packet(player: &MprisPlayer, pos_ms: i64) -> Packet {
             "volume": player.volume,
         }),
     )
+}
+
+fn sftp_mountpoint(device_name: &str, device_id: &str) -> PathBuf {
+    let clean: String = device_name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c == '/' || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let clean = if clean.is_empty() {
+        device_id.chars().take(8).collect()
+    } else {
+        clean
+    };
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join("Devices").join(clean)
+}
+
+async fn mount_is_active(mountpoint: &std::path::Path) -> bool {
+    let Ok(mounts) = tokio::fs::read_to_string("/proc/mounts").await else {
+        return false;
+    };
+    let mp = mountpoint.to_string_lossy();
+    mounts
+        .lines()
+        .any(|l| l.split_whitespace().nth(1) == Some(mp.as_ref()))
+}
+
+/// Whether a mountpoint actually serves entries right now. A dead
+/// sshfs answers fast with ENOTCONN, a wedged one can hang, so the
+/// probe is time-boxed.
+async fn mount_serves(mountpoint: &std::path::Path) -> bool {
+    let probe = async {
+        match tokio::fs::read_dir(mountpoint).await {
+            Ok(mut rd) => matches!(rd.next_entry().await, Ok(_)),
+            Err(_) => false,
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(3), probe)
+        .await
+        .unwrap_or(false)
 }

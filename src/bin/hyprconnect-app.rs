@@ -1,9 +1,13 @@
-//! HyprConnect GTK 4 app (phase 0 scope): device list, pairing with
-//! verification key confirmation, ping and unpair. All state lives in
-//! the daemon; this window is a thin client of its control socket.
+//! HyprConnect GTK 4 app: device list with pairing (verification key
+//! confirmation), ping, file sending, SFTP mount control, unpair,
+//! and the presenter target-monitor setting. All state lives in the
+//! daemon; this window is a thin client of its control socket.
 
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow, Box as GtkBox, Button, Label, ListBox, Orientation};
+use gtk4::{
+    Application, ApplicationWindow, Box as GtkBox, Button, DropDown, Label, ListBox, Orientation,
+    Separator, StringList,
+};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -39,12 +43,21 @@ fn main() {
     app.run();
 }
 
+struct AppState {
+    window: ApplicationWindow,
+    self_label: Label,
+    status_label: Label,
+    list: ListBox,
+    monitor_dropdown: DropDown,
+    monitor_model: StringList,
+}
+
 fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("HyprConnect")
-        .default_width(420)
-        .default_height(360)
+        .default_width(440)
+        .default_height(520)
         .build();
 
     let root = GtkBox::new(Orientation::Vertical, 8);
@@ -67,25 +80,85 @@ fn build_ui(app: &Application) {
     list.set_selection_mode(gtk4::SelectionMode::None);
     root.append(&list);
 
+    root.append(&Separator::new(Orientation::Horizontal));
+
+    let pres_title = Label::new(Some("Presentation remote"));
+    pres_title.add_css_class("title-4");
+    pres_title.set_halign(gtk4::Align::Start);
+    root.append(&pres_title);
+
+    let pres_row = GtkBox::new(Orientation::Horizontal, 8);
+    let pres_label = Label::new(Some("Pointer monitor"));
+    pres_row.append(&pres_label);
+    let monitor_model = StringList::new(&["Automatic (external if present)"]);
+    let monitor_dropdown = DropDown::new(Some(monitor_model.clone()), None::<&gtk4::Expression>);
+    pres_row.append(&monitor_dropdown);
+    root.append(&pres_row);
+
+    let pres_hint = Label::new(Some(
+        "Where the presenter pointer appears. Notes and slide previews arrive with the HyprConnect mobile app.",
+    ));
+    pres_hint.add_css_class("dim-label");
+    pres_hint.set_halign(gtk4::Align::Start);
+    pres_hint.set_wrap(true);
+    root.append(&pres_hint);
+
     window.set_child(Some(&root));
     window.present();
 
     let state = Rc::new(AppState {
+        window,
         self_label,
         status_label,
         list,
+        monitor_dropdown,
+        monitor_model,
     });
     refresh(state.clone());
+    load_settings(state.clone());
     gtk4::glib::timeout_add_local(std::time::Duration::from_millis(2500), move || {
         refresh(state.clone());
         gtk4::glib::ControlFlow::Continue
     });
 }
 
-struct AppState {
-    self_label: Label,
-    status_label: Label,
-    list: ListBox,
+fn load_settings(state: Rc<AppState>) {
+    gtk4::glib::spawn_future_local(async move {
+        let result = gtk4::gio::spawn_blocking(|| control_request(json!({"cmd": "settings"})))
+            .await
+            .map_err(|_| "worker failed".to_string())
+            .and_then(|r| r);
+        let Ok(resp) = result else { return };
+        let current = resp["presenterMonitor"].as_str().unwrap_or("").to_string();
+        let mut selected = 0u32;
+        if let Some(monitors) = resp["monitors"].as_array() {
+            for (i, m) in monitors.iter().enumerate() {
+                if let Some(name) = m.as_str() {
+                    state.monitor_model.append(name);
+                    if name == current {
+                        selected = (i + 1) as u32;
+                    }
+                }
+            }
+        }
+        state.monitor_dropdown.set_selected(selected);
+        let model = state.monitor_model.clone();
+        state.monitor_dropdown.connect_selected_notify(move |dd| {
+            let idx = dd.selected();
+            let value = if idx == 0 {
+                String::new()
+            } else {
+                model
+                    .string(idx)
+                    .map(|s| s.to_string())
+                    .unwrap_or_default()
+            };
+            let req = json!({"cmd": "set_presenter_monitor", "monitor": value});
+            gtk4::glib::spawn_future_local(async move {
+                let _ = gtk4::gio::spawn_blocking(move || control_request(req)).await;
+            });
+        });
+    });
 }
 
 fn refresh(state: Rc<AppState>) {
@@ -111,11 +184,14 @@ async fn gio_spawn_blocking_devices() -> Result<Value, String> {
         .map_err(|_| "worker failed".to_string())?
 }
 
-fn send_command(cmd: &str, device_id: &str) {
-    let req = json!({"cmd": cmd, "deviceId": device_id});
+fn send_request(req: Value) {
     gtk4::glib::spawn_future_local(async move {
         let _ = gtk4::gio::spawn_blocking(move || control_request(req)).await;
     });
+}
+
+fn send_command(cmd: &str, device_id: &str) {
+    send_request(json!({"cmd": cmd, "deviceId": device_id}));
 }
 
 fn rebuild_list(state: &AppState, devices: &Value) {
@@ -141,14 +217,15 @@ fn rebuild_list(state: &AppState, devices: &Value) {
         let paired = dev["paired"].as_bool().unwrap_or(false);
         let pending_in = dev["pendingIn"].as_bool().unwrap_or(false);
         let pending_out = dev["pendingOut"].as_bool().unwrap_or(false);
+        let mounted = dev["mounted"].as_bool().unwrap_or(false);
         let key = dev["verificationKey"].as_str().unwrap_or("").to_string();
 
         let row = GtkBox::new(Orientation::Vertical, 4);
-        let title = Label::new(Some(&format!("{} ({})", name, dtype)));
+        let title = Label::new(Some(&format!("{} ({})", name.trim(), dtype)));
         title.set_halign(gtk4::Align::Start);
         row.append(&title);
 
-        let status_text = if pending_in {
+        let mut status_text = if pending_in {
             format!("Pair request — verification key: {}", key)
         } else if pending_out {
             format!("Pair request sent — verification key: {}", key)
@@ -161,6 +238,9 @@ fn rebuild_list(state: &AppState, devices: &Value) {
         } else {
             "Discovered".to_string()
         };
+        if mounted {
+            status_text.push_str(" · storage mounted");
+        }
         let status = Label::new(Some(&status_text));
         status.add_css_class("dim-label");
         status.set_halign(gtk4::Align::Start);
@@ -186,12 +266,48 @@ fn rebuild_list(state: &AppState, devices: &Value) {
                 let ping = Button::with_label("Ping");
                 let id2 = id.clone();
                 ping.connect_clicked(move |_| {
-                    let req = json!({"cmd": "ping", "deviceId": id2, "message": "Ping from HyprConnect"});
-                    gtk4::glib::spawn_future_local(async move {
-                        let _ = gtk4::gio::spawn_blocking(move || control_request(req)).await;
-                    });
+                    send_request(json!({"cmd": "ping", "deviceId": id2, "message": "Ping from HyprConnect"}));
                 });
                 buttons.append(&ping);
+
+                let send = Button::with_label("Send file…");
+                let id2 = id.clone();
+                let window = state.window.clone();
+                send.connect_clicked(move |_| {
+                    let dialog = gtk4::FileDialog::builder()
+                        .title("Send file to phone")
+                        .modal(true)
+                        .build();
+                    let id3 = id2.clone();
+                    dialog.open(
+                        Some(&window),
+                        None::<&gtk4::gio::Cancellable>,
+                        move |res| {
+                            if let Ok(file) = res {
+                                if let Some(path) = file.path() {
+                                    send_request(json!({
+                                        "cmd": "send_file",
+                                        "deviceId": id3,
+                                        "path": path.to_string_lossy(),
+                                    }));
+                                }
+                            }
+                        },
+                    );
+                });
+                buttons.append(&send);
+
+                if mounted {
+                    let unmount = Button::with_label("Unmount storage");
+                    let id2 = id.clone();
+                    unmount.connect_clicked(move |_| send_command("unmount", &id2));
+                    buttons.append(&unmount);
+                } else {
+                    let mount = Button::with_label("Mount storage");
+                    let id2 = id.clone();
+                    mount.connect_clicked(move |_| send_command("mount", &id2));
+                    buttons.append(&mount);
+                }
             }
             let unpair = Button::with_label("Unpair");
             let id2 = id.clone();

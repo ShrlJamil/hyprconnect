@@ -102,6 +102,8 @@ struct Inner {
     sink_applying: std::collections::HashSet<String>,
     /// Active SFTP mounts: device id -> mountpoints (primary first).
     sftp_mounts: HashMap<String, Vec<PathBuf>>,
+    /// Monitor the presenter pointer is pinned to (None = automatic).
+    presenter_monitor: Option<String>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -175,7 +177,18 @@ impl Daemon {
         inner
             .devices
             .values()
-            .map(|d| d.to_json(&self.identity.spki_der))
+            .map(|d| {
+                let mut v = d.to_json(&self.identity.spki_der);
+                let mounts = inner.sftp_mounts.get(&d.id);
+                v["mounted"] = json!(mounts.is_some());
+                v["mountpoints"] = json!(mounts
+                    .map(|ms| ms
+                        .iter()
+                        .map(|m| m.to_string_lossy().to_string())
+                        .collect::<Vec<_>>())
+                    .unwrap_or_default());
+                v
+            })
             .collect()
     }
 
@@ -2765,6 +2778,31 @@ async fn control_task(daemon: Arc<Daemon>, path: PathBuf) {
                     daemon.unmount_sftp(device_id).await;
                     Ok(json!({"ok": true}))
                 }
+                "settings" => {
+                    let monitor = {
+                        let inner = daemon.inner.lock().await;
+                        inner.presenter_monitor.clone()
+                    };
+                    Ok(json!({
+                        "ok": true,
+                        "presenterMonitor": monitor,
+                        "monitors": hypr_monitor_names().await,
+                    }))
+                }
+                "set_presenter_monitor" => {
+                    let raw = req["monitor"].as_str().unwrap_or("").trim().to_string();
+                    let value = if raw.is_empty() { None } else { Some(raw) };
+                    {
+                        let mut inner = daemon.inner.lock().await;
+                        inner.presenter_monitor = value.clone();
+                    }
+                    save_presenter_monitor(&daemon.state, value.as_deref());
+                    log(&format!(
+                        "presenter monitor set to {}",
+                        value.as_deref().unwrap_or("auto")
+                    ));
+                    Ok(json!({"ok": true, "presenterMonitor": value}))
+                }
                 "send_file" => match req["path"].as_str() {
                     Some(path) => daemon.send_file(device_id, path).await,
                     None => Err(anyhow::anyhow!("path required")),
@@ -2827,6 +2865,7 @@ async fn run_daemon() -> Result<()> {
             sink_pending: HashMap::new(),
             sink_applying: std::collections::HashSet::new(),
             sftp_mounts: HashMap::new(),
+            presenter_monitor: load_presenter_monitor(&dir),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
@@ -3108,4 +3147,59 @@ async fn mount_serves(mountpoint: &std::path::Path) -> bool {
     tokio::time::timeout(std::time::Duration::from_secs(3), probe)
         .await
         .unwrap_or(false)
+}
+
+fn load_presenter_monitor(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("presenter.json")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    v["monitor"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn save_presenter_monitor(dir: &std::path::Path, monitor: Option<&str>) {
+    let v = json!({ "monitor": monitor });
+    let _ = std::fs::write(
+        dir.join("presenter.json"),
+        format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()),
+    );
+}
+
+/// Names of the connected monitors, for the presenter target picker.
+/// The instance signature is discovered the same way the shell
+/// scripts do it: the single entry under $XDG_RUNTIME_DIR/hypr.
+async fn hypr_monitor_names() -> Vec<String> {
+    let xdg = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| "/run/user/1000".to_string());
+    let hypr_dir = PathBuf::from(&xdg).join("hypr");
+    let signature = std::fs::read_dir(&hypr_dir).ok().and_then(|mut rd| {
+        rd.next()
+            .and_then(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+    });
+    let Some(signature) = signature else {
+        return Vec::new();
+    };
+    let out = tokio::process::Command::new("hyprctl")
+        .args(["monitors", "-j"])
+        .env("XDG_RUNTIME_DIR", &xdg)
+        .env("HYPRLAND_INSTANCE_SIGNATURE", &signature)
+        .env(
+            "WAYLAND_DISPLAY",
+            std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-1".to_string()),
+        )
+        .output()
+        .await;
+    let Ok(out) = out else { return Vec::new() };
+    let Ok(v) = serde_json::from_slice::<Value>(&out.stdout) else {
+        return Vec::new();
+    };
+    v.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
 }

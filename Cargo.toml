@@ -29,7 +29,7 @@ sha2 = "0.10"
 x509-parser = "0.16"
 socket2 = "0.5"
 anyhow = "1"
-gtk4 = { version = "0.10", optional = true }
+gtk4 = { version = "0.10", optional = true, features = ["v4_10"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 libc = "0.2"

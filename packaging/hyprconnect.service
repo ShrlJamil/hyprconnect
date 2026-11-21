@@ -1,0 +1,12 @@
+[Unit]
+Description=HyprConnect daemon (KDE Connect-compatible, compact)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/hyprconnect run
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

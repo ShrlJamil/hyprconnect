@@ -37,3 +37,36 @@ of scope by design.
 ## License
 
 To be decided before the first public release.
+
+## Development
+
+Build the daemon and CLI:
+
+```sh
+cargo build --release --bin hyprconnect
+```
+
+Build the GTK 4 app as well:
+
+```sh
+cargo build --release --features gtk-ui
+```
+
+Run the daemon (a systemd user unit is provided in `packaging/`):
+
+```sh
+hyprconnect run
+```
+
+Talk to a running daemon through the same binary:
+
+```sh
+hyprconnect devices          # discovered and paired devices
+hyprconnect pair <deviceId>   # request pairing (confirm on both devices)
+hyprconnect accept <deviceId> # accept an incoming pair request
+hyprconnect ping <deviceId>   # send a ping
+hyprconnect monitor           # stream daemon events
+```
+
+Runtime state (device identity, certificates, trusted devices) lives in
+`~/.local/state/hyprconnect/` and is never part of this repository.

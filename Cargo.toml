@@ -1,0 +1,32 @@
+[package]
+name = "hyprconnect"
+version = "0.1.0"
+edition = "2021"
+description = "Compact KDE Connect-compatible daemon and GTK 4 app for Hyprland"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "hyprconnect"
+path = "src/main.rs"
+
+[[bin]]
+name = "hyprconnect-app"
+path = "src/bin/hyprconnect-app.rs"
+required-features = ["gtk-ui"]
+
+[features]
+gtk-ui = ["dep:gtk4"]
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+rcgen = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+x509-parser = "0.16"
+socket2 = "0.5"
+anyhow = "1"
+gtk4 = { version = "0.10", optional = true }

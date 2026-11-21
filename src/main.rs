@@ -17,7 +17,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream, UdpSocket, UnixListener};
 use tokio::sync::{mpsc, Mutex};
 
@@ -237,7 +237,7 @@ impl Daemon {
 
     // ---- packet handling ---------------------------------------------------
 
-    async fn handle_packet(&self, device_id: &str, packet: Packet) {
+    async fn handle_packet(self: &Arc<Self>, device_id: &str, packet: Packet) {
         match packet.ptype.as_str() {
             "kdeconnect.pair" => {
                 let pair = packet.body["pair"].as_bool().unwrap_or(false);
@@ -343,6 +343,19 @@ impl Daemon {
                     .await;
                 }
             }
+            "kdeconnect.share.request" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    self.handle_share_request(device_id, &packet).await;
+                }
+            }
             "kdeconnect.clipboard" | "kdeconnect.clipboard.connect" => {
                 let paired = {
                     let inner = self.inner.lock().await;
@@ -419,6 +432,237 @@ impl Daemon {
         for id in targets {
             self.send_packet(&id, packet.clone()).await;
         }
+    }
+
+    /// A kdeconnect.share.request arrived from a paired device.
+    /// Files come with an out-of-band payload on a separate
+    /// connection; text and url shares ride in the packet itself.
+    async fn handle_share_request(self: &Arc<Self>, device_id: &str, packet: &Packet) {
+        log(&format!(
+            "share.request from {}: {}",
+            device_id,
+            serde_json::to_string(packet).unwrap_or_default()
+        ));
+        if let Some(text) = packet.body.get("text").and_then(|t| t.as_str()) {
+            log(&format!(
+                "shared text from {} ({} chars), applying as clipboard",
+                device_id,
+                text.len()
+            ));
+            self.apply_remote_clipboard(text).await;
+            return;
+        }
+        if let Some(url) = packet.body.get("url").and_then(|u| u.as_str()) {
+            log(&format!("shared url from {}: {}", device_id, url));
+            self.emit(json!({
+                "event": "url_shared",
+                "deviceId": device_id,
+                "url": url,
+            }))
+            .await;
+            return;
+        }
+        let filename = packet
+            .body
+            .get("filename")
+            .and_then(|f| f.as_str())
+            .unwrap_or("")
+            .to_string();
+        let port = packet
+            .payload_transfer_info
+            .as_ref()
+            .and_then(|i| i.get("port"))
+            .and_then(|p| p.as_u64());
+        let size = packet.payload_size.unwrap_or(-1);
+        if filename.is_empty() || port.is_none() || size < 0 {
+            log("share.request without filename/payload info; not downloading");
+            return;
+        }
+        let daemon = self.clone();
+        let device_id = device_id.to_string();
+        tokio::spawn(async move {
+            if let Err(e) = daemon
+                .receive_file(&device_id, &filename, port.unwrap() as u16, size as u64)
+                .await
+            {
+                log(&format!(
+                    "receiving {} from {} failed: {:#}",
+                    filename, device_id, e
+                ));
+            }
+        });
+    }
+
+    /// Download one shared file over its payload connection.
+    async fn receive_file(
+        self: &Arc<Self>,
+        device_id: &str,
+        filename: &str,
+        port: u16,
+        size: u64,
+    ) -> Result<()> {
+        let ip = {
+            let inner = self.inner.lock().await;
+            inner
+                .devices
+                .get(device_id)
+                .and_then(|d| d.last_ip)
+                .context("device address unknown")?
+        };
+        let tcp = TcpStream::connect((ip, port))
+            .await
+            .context("payload connect")?;
+        // Payload connections use the natural TLS roles (listener =
+        // server, connector = client), unlike the main channel where
+        // the roles are reversed. Verified against the real Android
+        // app: acting as server here starves the handshake.
+        let (mut stream, peer_cert) =
+            tls::handshake_as_client(tcp, &self.identity, device_id).await?;
+        let (cn, _) = identity::cert_info(&peer_cert)?;
+        if cn != device_id {
+            anyhow::bail!("payload peer CN {} is not {}", cn, device_id);
+        }
+        let dest = unique_download_path(filename);
+        let mut file = tokio::fs::File::create(&dest).await?;
+        let mut remaining = size;
+        let mut buf = vec![0u8; 64 * 1024];
+        while remaining > 0 {
+            let want = remaining.min(buf.len() as u64) as usize;
+            let n = stream.read(&mut buf[..want]).await?;
+            if n == 0 {
+                anyhow::bail!("payload ended early, {} bytes missing", remaining);
+            }
+            file.write_all(&buf[..n]).await?;
+            remaining -= n as u64;
+        }
+        file.flush().await?;
+        log(&format!(
+            "received {} ({} bytes) -> {}",
+            filename,
+            size,
+            dest.display()
+        ));
+        self.emit(json!({
+            "event": "file_received",
+            "deviceId": device_id,
+            "filename": filename,
+            "path": dest.to_string_lossy(),
+            "size": size,
+        }))
+        .await;
+        Ok(())
+    }
+
+    /// Offer a local file to a paired, connected device. The share
+    /// packet names a payload port; the device connects to it and we
+    /// stream the bytes over a second TLS connection.
+    async fn send_file(
+        self: &Arc<Self>,
+        device_id: &str,
+        path: &str,
+    ) -> Result<Value> {
+        {
+            let inner = self.inner.lock().await;
+            let dev = inner
+                .devices
+                .get(device_id)
+                .context("unknown device")?;
+            if !dev.paired {
+                anyhow::bail!("device is not paired");
+            }
+            if !dev.connected {
+                anyhow::bail!("device is not connected");
+            }
+        }
+        let meta = tokio::fs::metadata(path)
+            .await
+            .context("cannot read the file")?;
+        if !meta.is_file() {
+            anyhow::bail!("not a regular file");
+        }
+        let filename = std::path::Path::new(path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .context("path has no file name")?;
+        let mut listener = None;
+        let mut port = 0u16;
+        for p in 1739..=1764u16 {
+            if let Ok(l) = TcpListener::bind(("0.0.0.0", p)).await {
+                listener = Some(l);
+                port = p;
+                break;
+            }
+        }
+        let listener = listener.context("no free payload port")?;
+        let mut packet = Packet::new(
+            "kdeconnect.share.request",
+            json!({ "filename": filename }),
+        );
+        packet.payload_size = Some(meta.len() as i64);
+        packet.payload_transfer_info = Some(json!({ "port": port }));
+        if !self.send_packet(device_id, packet).await {
+            anyhow::bail!("could not send the share packet");
+        }
+        log(&format!(
+            "offered {} ({} bytes) to {} on payload port {}",
+            filename,
+            meta.len(),
+            device_id,
+            port
+        ));
+        let daemon = self.clone();
+        let device_id = device_id.to_string();
+        let path = path.to_string();
+        tokio::spawn(async move {
+            match tokio::time::timeout(
+                Duration::from_secs(120),
+                listener.accept(),
+            )
+            .await
+            {
+                Ok(Ok((tcp, _))) => {
+                    if let Err(e) = daemon.stream_file(&device_id, tcp, &path).await {
+                        log(&format!("sending {} failed: {:#}", path, e));
+                    }
+                }
+                Ok(Err(e)) => log(&format!("payload accept failed: {:#}", e)),
+                Err(_) => log("file send timed out: the device never fetched the payload"),
+            }
+        });
+        Ok(json!({ "ok": true, "port": port }))
+    }
+
+    /// Stream one file over an accepted payload connection.
+    async fn stream_file(&self, device_id: &str, tcp: TcpStream, path: &str) -> Result<()> {
+        // Payload connections use the natural TLS roles: we accepted
+        // this connection, so we are the TLS server.
+        let (mut stream, peer_cert) =
+            tls::handshake_as_server(tcp, &self.identity).await?;
+        let (cn, _) = identity::cert_info(&peer_cert)?;
+        if cn != device_id {
+            anyhow::bail!("payload peer CN {} is not {}", cn, device_id);
+        }
+        let mut file = tokio::fs::File::open(path).await?;
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut total: u64 = 0;
+        loop {
+            let n = file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            stream.write_all(&buf[..n]).await?;
+            total += n as u64;
+        }
+        stream.flush().await?;
+        log(&format!("sent {} ({} bytes) to {}", path, total, device_id));
+        self.emit(json!({
+            "event": "file_sent",
+            "deviceId": device_id,
+            "path": path,
+            "size": total,
+        }))
+        .await;
+        Ok(())
     }
 
     // ---- connection lifecycle ----------------------------------------------
@@ -927,6 +1171,10 @@ async fn control_task(daemon: Arc<Daemon>, path: PathBuf) {
                         Err(anyhow::anyhow!("device is not connected"))
                     }
                 }
+                "send_file" => match req["path"].as_str() {
+                    Some(path) => daemon.send_file(device_id, path).await,
+                    None => Err(anyhow::anyhow!("path required")),
+                },
                 _ => Err(anyhow::anyhow!("unknown command")),
             };
             let response = match result {
@@ -1077,10 +1325,43 @@ async fn main() -> Result<()> {
             }
             cli_command(req).await
         }
+        "send" => {
+            let device = args.get(1).context("device id required")?;
+            let path = args.get(2).context("file path required")?;
+            cli_command(json!({"cmd": "send_file", "deviceId": device, "path": path})).await
+        }
         other => {
             eprintln!("unknown command: {}", other);
-            eprintln!("usage: hyprconnect [run|devices|monitor|pair|accept|reject|unpair|ping] [deviceId]");
+            eprintln!("usage: hyprconnect [run|devices|monitor|pair|accept|reject|unpair|ping|send] [deviceId] [path]");
             std::process::exit(2);
         }
     }
+}
+
+/// Destination for a received file: ~/Downloads with the peer's
+/// file name reduced to its base name, deduplicated as "name (n)".
+fn unique_download_path(filename: &str) -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let dir = PathBuf::from(home).join("Downloads");
+    let _ = std::fs::create_dir_all(&dir);
+    let clean = std::path::Path::new(filename)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty() && s != "." && s != "..")
+        .unwrap_or_else(|| "shared-file".to_string());
+    let candidate = dir.join(&clean);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let (stem, ext) = match clean.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{}", e)),
+        _ => (clean.clone(), String::new()),
+    };
+    for i in 1..1000 {
+        let p = dir.join(format!("{} ({}){}", stem, i, ext));
+        if !p.exists() {
+            return p;
+        }
+    }
+    candidate
 }

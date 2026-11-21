@@ -31,6 +31,9 @@ pub const INCOMING_CAPABILITIES: &[&str] = &[
     "kdeconnect.clipboard.connect",
     "kdeconnect.share.request",
     "kdeconnect.notification",
+    "kdeconnect.mpris",
+    "kdeconnect.mpris.request",
+    "kdeconnect.systemvolume.request",
 ];
 pub const OUTGOING_CAPABILITIES: &[&str] = &[
     "kdeconnect.ping",
@@ -40,6 +43,9 @@ pub const OUTGOING_CAPABILITIES: &[&str] = &[
     "kdeconnect.notification.request",
     "kdeconnect.notification.reply",
     "kdeconnect.notification.action",
+    "kdeconnect.mpris",
+    "kdeconnect.mpris.request",
+    "kdeconnect.systemvolume",
 ];
 
 pub fn now_ms() -> i64 {

@@ -90,6 +90,44 @@ struct Inner {
     notif_ids: HashMap<String, u32>,
     /// Desktop notification id -> where its actions and replies go.
     notif_routes: HashMap<u32, NotifRoute>,
+    /// Desktop MPRIS players by display name.
+    mpris_players: HashMap<String, MprisPlayer>,
+    /// Last album art path attached for each player (dedupe).
+    mpris_art_sent: HashMap<String, String>,
+    /// Cached audio sinks for system volume control.
+    sinks: Vec<SinkInfo>,
+    /// Latest requested sink volume not yet applied (drag coalescing).
+    sink_pending: HashMap<String, i64>,
+    /// Sinks with a volume-apply worker currently running.
+    sink_applying: std::collections::HashSet<String>,
+}
+
+#[derive(Clone, PartialEq)]
+struct SinkInfo {
+    name: String,
+    description: String,
+    volume: i64,
+    muted: bool,
+    is_default: bool,
+}
+
+#[derive(Clone, PartialEq)]
+struct MprisPlayer {
+    bus_name: String,
+    name: String,
+    title: String,
+    artist: String,
+    album: String,
+    art_url: String,
+    is_playing: bool,
+    length_ms: i64,
+    volume: i32,
+    can_play: bool,
+    can_pause: bool,
+    can_next: bool,
+    can_prev: bool,
+    can_seek: bool,
+    track_id: String,
 }
 
 #[derive(Clone)]
@@ -354,6 +392,42 @@ impl Daemon {
                     }))
                     .await;
                 }
+            }
+            "kdeconnect.systemvolume.request" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    self.handle_systemvolume_request(device_id, &packet)
+                        .await;
+                }
+            }
+            "kdeconnect.mpris.request" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    self.handle_mpris_request(device_id, &packet).await;
+                }
+            }
+            "kdeconnect.mpris" => {
+                // The phone's own players; ground truth for now, the
+                // desktop-side control UI belongs to the app phase.
+                log(&format!(
+                    "mpris state from {}: {}",
+                    device_id,
+                    serde_json::to_string(&packet.body).unwrap_or_default()
+                ));
             }
             "kdeconnect.notification" => {
                 let paired = {
@@ -990,6 +1064,827 @@ impl Daemon {
         }
     }
 
+    // ---- MPRIS bridge -------------------------------------------------------
+
+    async fn mpris_send_all_to(self: &Arc<Self>, device_id: &str) {
+        let buses: Vec<String> = {
+            let inner = self.inner.lock().await;
+            inner
+                .mpris_players
+                .values()
+                .map(|p| p.bus_name.clone())
+                .collect()
+        };
+        if buses.is_empty() {
+            self.send_packet(
+                device_id,
+                Packet::new("kdeconnect.mpris", json!({ "playerList": [] })),
+            )
+            .await;
+            return;
+        }
+        let Ok(conn) = self.notify_conn().await else {
+            return;
+        };
+        let mut names = Vec::new();
+        for bus in &buses {
+            if let Some((player, pos)) = self.mpris_read_player(&conn, bus).await {
+                names.push(player.name.clone());
+                self.send_mpris_state(device_id, &player, pos).await;
+            }
+        }
+        self.send_packet(
+            device_id,
+            Packet::new("kdeconnect.mpris", json!({ "playerList": names })),
+        )
+        .await;
+    }
+
+    async fn mpris_broadcast(&self, packet: Packet) {
+        let targets: Vec<String> = {
+            let inner = self.inner.lock().await;
+            inner
+                .devices
+                .values()
+                .filter(|d| d.paired && d.connected)
+                .map(|d| d.id.clone())
+                .collect()
+        };
+        for t in targets {
+            self.send_packet(&t, packet.clone()).await;
+        }
+    }
+
+    async fn mpris_read_player(
+        &self,
+        conn: &zbus::Connection,
+        bus: &str,
+    ) -> Option<(MprisPlayer, i64)> {
+        use zbus::zvariant::OwnedValue;
+        let player_proxy = zbus::Proxy::new(
+            conn,
+            bus,
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2.Player",
+        )
+        .await
+        .ok()?;
+        let root_proxy = zbus::Proxy::new(
+            conn,
+            bus,
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2",
+        )
+        .await
+        .ok()?;
+        let mut name: String = root_proxy
+            .get_property("Identity")
+            .await
+            .unwrap_or_default();
+        if name.is_empty() {
+            name = bus
+                .trim_start_matches("org.mpris.MediaPlayer2.")
+                .to_string();
+        }
+        let metadata: HashMap<String, OwnedValue> =
+            player_proxy.get_property("Metadata").await.unwrap_or_default();
+        let get = |k: &str| metadata.get(k);
+        let title = get("xesam:title").map(ov_str).unwrap_or_default();
+        let artist = get("xesam:artist").map(ov_str_list).unwrap_or_default();
+        let album = get("xesam:album").map(ov_str).unwrap_or_default();
+        let art_url = get("mpris:artUrl").map(ov_str).unwrap_or_default();
+        let length_ms = get("mpris:length").map(ov_i64).unwrap_or(0) / 1000;
+        let track_id = get("mpris:trackid").map(ov_str).unwrap_or_default();
+        let status: String = player_proxy
+            .get_property("PlaybackStatus")
+            .await
+            .unwrap_or_default();
+        let volume: f64 = player_proxy.get_property("Volume").await.unwrap_or(0.0);
+        let position: i64 = player_proxy.get_property("Position").await.unwrap_or(0);
+        let can_play = player_proxy
+            .get_property::<bool>("CanPlay")
+            .await
+            .unwrap_or(false);
+        let can_pause = player_proxy
+            .get_property::<bool>("CanPause")
+            .await
+            .unwrap_or(false);
+        let can_next = player_proxy
+            .get_property::<bool>("CanGoNext")
+            .await
+            .unwrap_or(false);
+        let can_prev = player_proxy
+            .get_property::<bool>("CanGoPrevious")
+            .await
+            .unwrap_or(false);
+        let can_seek = player_proxy
+            .get_property::<bool>("CanSeek")
+            .await
+            .unwrap_or(false);
+        let player = MprisPlayer {
+            bus_name: bus.to_string(),
+            name,
+            title,
+            artist,
+            album,
+            art_url,
+            is_playing: status == "Playing",
+            length_ms,
+            volume: (volume * 100.0).round() as i32,
+            can_play,
+            can_pause,
+            can_next,
+            can_prev,
+            can_seek,
+            track_id,
+        };
+        Some((player, position / 1000))
+    }
+
+    async fn mpris_refresh_players(self: &Arc<Self>) {
+        let Ok(conn) = self.notify_conn().await else {
+            return;
+        };
+        let Ok(dbus) = zbus::fdo::DBusProxy::new(&conn).await else {
+            return;
+        };
+        let Ok(names) = dbus.list_names().await else {
+            return;
+        };
+        let live: Vec<String> = names
+            .iter()
+            .map(|n| n.to_string())
+            .filter(|n| n.starts_with("org.mpris.MediaPlayer2."))
+            .collect();
+        let known: Vec<String> = {
+            let inner = self.inner.lock().await;
+            inner
+                .mpris_players
+                .values()
+                .map(|p| p.bus_name.clone())
+                .collect()
+        };
+        let mut changed = false;
+        for bus in &live {
+            if !known.contains(bus) {
+                if let Some((player, _)) = self.mpris_read_player(&conn, bus).await {
+                    log(&format!("mpris player appeared: {}", player.name));
+                    let mut inner = self.inner.lock().await;
+                    inner
+                        .mpris_players
+                        .insert(player.name.clone(), player);
+                    changed = true;
+                    let d = self.clone();
+                    let b = bus.clone();
+                    tokio::spawn(d.mpris_watch_player(b));
+                }
+            }
+        }
+        {
+            let mut inner = self.inner.lock().await;
+            let gone: Vec<String> = inner
+                .mpris_players
+                .values()
+                .filter(|p| !live.contains(&p.bus_name))
+                .map(|p| p.name.clone())
+                .collect();
+            for name in gone {
+                log(&format!("mpris player gone: {}", name));
+                inner.mpris_players.remove(&name);
+                changed = true;
+            }
+        }
+        if changed {
+            let names_now: Vec<String> = {
+                let inner = self.inner.lock().await;
+                inner.mpris_players.keys().cloned().collect()
+            };
+            self.mpris_broadcast(Packet::new(
+                "kdeconnect.mpris",
+                json!({ "playerList": names_now }),
+            ))
+            .await;
+            let targets: Vec<String> = {
+                let inner = self.inner.lock().await;
+                inner
+                    .devices
+                    .values()
+                    .filter(|d| d.paired && d.connected)
+                    .map(|d| d.id.clone())
+                    .collect()
+            };
+            for t in targets {
+                self.mpris_send_all_to(&t).await;
+            }
+        }
+    }
+
+    fn mpris_watch_player(
+        self: Arc<Self>,
+        bus: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        Box::pin(async move { self.mpris_watch_player_inner(bus).await })
+    }
+
+    async fn mpris_watch_player_inner(self: Arc<Self>, bus: String) {
+        use futures_lite::StreamExt;
+        let Ok(conn) = self.notify_conn().await else {
+            return;
+        };
+        let Ok(proxy) = zbus::Proxy::new(
+            &conn,
+            bus.as_str(),
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2.Player",
+        )
+        .await
+        else {
+            return;
+        };
+        let Ok(mut stream) = proxy.receive_signal("PropertiesChanged").await else {
+            return;
+        };
+        while let Some(msg) = stream.next().await {
+            let Ok((iface, _, _)) = msg.body().deserialize::<(
+                String,
+                HashMap<String, zbus::zvariant::OwnedValue>,
+                Vec<String>,
+            )>() else {
+                continue;
+            };
+            if iface != "org.mpris.MediaPlayer2.Player" {
+                continue;
+            }
+            if let Some((player, pos)) = self.mpris_read_player(&conn, &bus).await {
+                let changed = {
+                    let mut inner = self.inner.lock().await;
+                    let old = inner.mpris_players.get(&player.name).cloned();
+                    if old.as_ref() != Some(&player) {
+                        inner
+                            .mpris_players
+                            .insert(player.name.clone(), player.clone());
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if changed {
+                    for t in self.mpris_targets().await {
+                        self.send_mpris_state(&t, &player, pos).await;
+                    }
+                }
+            }
+        }
+        let d = self.clone();
+        tokio::spawn(async move { d.mpris_refresh_players().await });
+    }
+
+    async fn mpris_bridge_loop(self: Arc<Self>) {
+        use futures_lite::StreamExt;
+        self.mpris_refresh_players().await;
+        loop {
+            let Ok(conn) = self.notify_conn().await else {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            };
+            let Ok(dbus) = zbus::fdo::DBusProxy::new(&conn).await else {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            };
+            match dbus.receive_name_owner_changed().await {
+                Ok(mut stream) => {
+                    log("mpris bridge active");
+                    loop {
+                        tokio::select! {
+                            sig = stream.next() => {
+                                match sig {
+                                    Some(s) => {
+                                        if let Ok(args) = s.args() {
+                                            if format!("{}", args.name).starts_with("org.mpris.MediaPlayer2.") {
+                                                self.mpris_refresh_players().await;
+                                            }
+                                        }
+                                    }
+                                    None => break,
+                                }
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                                self.mpris_refresh_players().await;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log(&format!("mpris bridge signal failed: {:#}", e));
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            }
+        }
+    }
+
+    async fn handle_mpris_request(self: &Arc<Self>, device_id: &str, packet: &Packet) {
+        log(&format!(
+            "mpris.request from {}: {}",
+            device_id,
+            serde_json::to_string(packet).unwrap_or_default()
+        ));
+        let body = &packet.body;
+        if body
+            .get("requestPlayerList")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            self.mpris_send_all_to(device_id).await;
+            return;
+        }
+        let Some(player_name) = body.get("player").and_then(|v| v.as_str()) else {
+            return;
+        };
+        let bus = {
+            let inner = self.inner.lock().await;
+            inner
+                .mpris_players
+                .get(player_name)
+                .map(|p| p.bus_name.clone())
+        };
+        let Some(bus) = bus else {
+            log(&format!("mpris request for unknown player {}", player_name));
+            return;
+        };
+        if body
+            .get("requestNowPlaying")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            if let Ok(conn) = self.notify_conn().await {
+                if let Some((player, pos)) = self.mpris_read_player(&conn, &bus).await {
+                    self.send_mpris_state(device_id, &player, pos).await;
+                }
+            }
+            return;
+        }
+        let Ok(conn) = self.notify_conn().await else {
+            return;
+        };
+        let Ok(proxy) = zbus::Proxy::new(
+            &conn,
+            bus.as_str(),
+            "/org/mpris/MediaPlayer2",
+            "org.mpris.MediaPlayer2.Player",
+        )
+        .await
+        else {
+            return;
+        };
+        if let Some(action) = body.get("action").and_then(|v| v.as_str()) {
+            match action {
+                "Play" | "Pause" | "PlayPause" | "Next" | "Previous" | "Stop" => {
+                    let _ = proxy.call::<&str, _, ()>(action, &()).await;
+                    log(&format!("mpris {} -> {}", action, player_name));
+                }
+                other => log(&format!("mpris unknown action {}", other)),
+            }
+        }
+        if let Some(v) = body.get("setVolume").and_then(|v| v.as_i64()) {
+            let _ = proxy
+                .set_property("Volume", (v.clamp(0, 100) as f64) / 100.0)
+                .await;
+        }
+        if let Some(seek) = body.get("Seek").and_then(|v| v.as_i64()) {
+            let _ = proxy.call::<&str, _, ()>("Seek", &(seek * 1000,)).await;
+        }
+        if let Some(pos) = body.get("SetPosition").and_then(|v| v.as_i64()) {
+            let track = {
+                let inner = self.inner.lock().await;
+                inner
+                    .mpris_players
+                    .get(player_name)
+                    .map(|p| p.track_id.clone())
+                    .unwrap_or_default()
+            };
+            if let Ok(path) = zbus::zvariant::ObjectPath::try_from(track) {
+                let _ = proxy
+                    .call::<&str, _, ()>("SetPosition", &(path, pos * 1000))
+                    .await;
+            }
+        }
+        // Let the command land, then push the fresh state.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if let Some((player, pos)) = self.mpris_read_player(&conn, &bus).await {
+            let mut inner = self.inner.lock().await;
+            inner
+                .mpris_players
+                .insert(player.name.clone(), player.clone());
+            drop(inner);
+            for t in self.mpris_targets().await {
+                self.send_mpris_state(&t, &player, pos).await;
+            }
+        }
+    }
+
+    async fn mpris_targets(&self) -> Vec<String> {
+        let inner = self.inner.lock().await;
+        inner
+            .devices
+            .values()
+            .filter(|d| d.paired && d.connected)
+            .map(|d| d.id.clone())
+            .collect()
+    }
+
+    /// Send a packet whose payload is a local file (album art, ...).
+    /// Mirrors the send_file flow: listen on a payload port, advertise
+    /// it in the packet, stream the file to whoever connects.
+    async fn send_packet_with_file_payload(
+        self: &Arc<Self>,
+        device_id: &str,
+        mut packet: Packet,
+        path: &str,
+        art_key: Option<String>,
+    ) -> bool {
+        let Ok(meta) = tokio::fs::metadata(path).await else {
+            return false;
+        };
+        if !meta.is_file() {
+            return false;
+        }
+        let mut listener = None;
+        let mut port = 0u16;
+        for p in 1739..=1764u16 {
+            if let Ok(l) = TcpListener::bind(("0.0.0.0", p)).await {
+                listener = Some(l);
+                port = p;
+                break;
+            }
+        }
+        let Some(listener) = listener else {
+            return false;
+        };
+        packet.payload_size = Some(meta.len() as i64);
+        packet.payload_transfer_info = Some(json!({ "port": port }));
+        if !self.send_packet(device_id, packet).await {
+            return false;
+        }
+        let daemon = self.clone();
+        let device_id = device_id.to_string();
+        let path = path.to_string();
+        tokio::spawn(async move {
+            let mut failed = false;
+            match tokio::time::timeout(Duration::from_secs(120), listener.accept()).await {
+                Ok(Ok((tcp, _))) => {
+                    if let Err(e) = daemon.stream_file(&device_id, tcp, &path).await {
+                        log(&format!("payload stream {} failed: {:#}", path, e));
+                        failed = true;
+                    }
+                }
+                Ok(Err(e)) => {
+                    log(&format!("payload accept failed: {:#}", e));
+                    failed = true;
+                }
+                Err(_) => {
+                    log("payload timed out: the device never fetched it");
+                    failed = true;
+                }
+            }
+            // A failed art transfer unmarks the art, so the next state
+            // send (e.g. when the phone opens the player UI and asks
+            // for nowPlaying) offers it again.
+            if failed {
+                if let Some(key) = art_key {
+                    let mut inner = daemon.inner.lock().await;
+                    inner.mpris_art_sent.remove(&key);
+                }
+            }
+        });
+        true
+    }
+
+    /// Send one player's state, attaching the album art as payload
+    /// when the track's art file changed since the last send.
+    async fn send_mpris_state(self: &Arc<Self>, device_id: &str, player: &MprisPlayer, pos_ms: i64) {
+        let packet = mpris_state_packet(player, pos_ms);
+        if let Some(path) = player.art_url.strip_prefix("file://") {
+            let changed = {
+                let mut inner = self.inner.lock().await;
+                if inner.mpris_art_sent.get(&player.name).map(|s| s.as_str())
+                    != Some(path)
+                {
+                    inner
+                        .mpris_art_sent
+                        .insert(player.name.clone(), path.to_string());
+                    true
+                } else {
+                    false
+                }
+            };
+            if changed
+                && self
+                    .send_packet_with_file_payload(
+                        device_id,
+                        packet.clone(),
+                        path,
+                        Some(player.name.clone()),
+                    )
+                    .await
+            {
+                return;
+            }
+        }
+        self.send_packet(device_id, packet).await;
+    }
+
+    // ---- system volume (PulseAudio via pactl) --------------------------------
+
+    async fn pactl(&self, args: &[&str]) -> Option<String> {
+        let runtime = std::env::var("XDG_RUNTIME_DIR")
+            .unwrap_or_else(|_| format!("/run/user/{}", unsafe { libc::getuid() }));
+        let out = tokio::process::Command::new("pactl")
+            .args(args)
+            .env("XDG_RUNTIME_DIR", runtime)
+            .output()
+            .await
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+
+    async fn read_sinks(&self) -> Vec<SinkInfo> {
+        let Some(text) = self.pactl(&["--format=json", "list", "sinks"]).await else {
+            return Vec::new();
+        };
+        let Ok(Value::Array(list)) = serde_json::from_str::<Value>(&text) else {
+            return Vec::new();
+        };
+        let default_name = self
+            .pactl(&["info"])
+            .await
+            .and_then(|info| {
+                info.lines().find_map(|l| {
+                    l.strip_prefix("Default Sink:").map(|s| s.trim().to_string())
+                })
+            })
+            .unwrap_or_default();
+        let mut sinks = Vec::new();
+        for s in &list {
+            let name = s["name"].as_str().unwrap_or_default().to_string();
+            if name.is_empty() {
+                continue;
+            }
+            // Hide sinks whose ports are all unavailable (unplugged HDMI).
+            if let Some(ports) = s["ports"].as_array() {
+                if !ports.is_empty()
+                    && ports
+                        .iter()
+                        .all(|p| p["availability"].as_str() == Some("not available"))
+                {
+                    continue;
+                }
+            }
+            let mut total: i64 = 0;
+            let mut channels: i64 = 0;
+            if let Some(vol) = s["volume"].as_object() {
+                for (_, ch) in vol {
+                    if let Some(v) = ch["value"].as_i64() {
+                        total += v;
+                        channels += 1;
+                    }
+                }
+            }
+            let volume = if channels > 0 { total / channels } else { 0 };
+            sinks.push(SinkInfo {
+                description: s["description"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                muted: s["mute"].as_bool().unwrap_or(false),
+                is_default: name == default_name,
+                name,
+                volume,
+            });
+        }
+        sinks
+    }
+
+    async fn send_sink_list(&self, device_id: &str) {
+        let sinks = self.read_sinks().await;
+        {
+            let mut inner = self.inner.lock().await;
+            inner.sinks = sinks.clone();
+        }
+        let list: Vec<Value> = sinks
+            .iter()
+            .map(|s| {
+                json!({
+                    "name": s.name,
+                    "description": s.description,
+                    "muted": s.muted,
+                    "volume": s.volume,
+                    "maxVolume": 65536,
+                    "enabled": s.is_default,
+                })
+            })
+            .collect();
+        self.send_packet(
+            device_id,
+            Packet::new("kdeconnect.systemvolume", json!({ "sinkList": list })),
+        )
+        .await;
+    }
+
+    /// Re-read the sinks and push whatever changed to every device.
+    async fn sink_refresh_and_broadcast(&self) {
+        let new = self.read_sinks().await;
+        let old = {
+            let mut inner = self.inner.lock().await;
+            let old = inner.sinks.clone();
+            inner.sinks = new.clone();
+            old
+        };
+        let structure_changed = new.len() != old.len()
+            || new
+                .iter()
+                .zip(old.iter())
+                .any(|(n, o)| n.name != o.name || n.is_default != o.is_default);
+        if structure_changed {
+            let targets = self.mpris_targets().await;
+            for t in targets {
+                self.send_sink_list(&t).await;
+            }
+            return;
+        }
+        for (n, o) in new.iter().zip(old.iter()) {
+            if n.volume != o.volume {
+                self.mpris_broadcast(Packet::new(
+                    "kdeconnect.systemvolume",
+                    json!({ "name": n.name, "volume": n.volume }),
+                ))
+                .await;
+            }
+            if n.muted != o.muted {
+                self.mpris_broadcast(Packet::new(
+                    "kdeconnect.systemvolume",
+                    json!({ "name": n.name, "muted": n.muted }),
+                ))
+                .await;
+            }
+        }
+    }
+
+    async fn sink_watch_loop(self: Arc<Self>) {
+        use tokio::io::AsyncBufReadExt;
+        let initial = self.read_sinks().await;
+        {
+            let mut inner = self.inner.lock().await;
+            inner.sinks = initial;
+        }
+        log("system volume watcher active");
+        loop {
+            let runtime = std::env::var("XDG_RUNTIME_DIR")
+                .unwrap_or_else(|_| format!("/run/user/{}", unsafe { libc::getuid() }));
+            let child = tokio::process::Command::new("pactl")
+                .arg("subscribe")
+                .env("XDG_RUNTIME_DIR", runtime)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            let Ok(mut child) = child else {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            };
+            let Some(stdout) = child.stdout.take() else {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            };
+            let mut lines = tokio::io::BufReader::new(stdout).lines();
+            let mut dirty = false;
+            loop {
+                tokio::select! {
+                    line = lines.next_line() => {
+                        match line {
+                            Ok(Some(l)) => {
+                                if l.contains("on sink") || l.contains("on server") {
+                                    dirty = true;
+                                }
+                            }
+                            _ => break,
+                        }
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(250)), if dirty => {
+                        dirty = false;
+                        self.sink_refresh_and_broadcast().await;
+                    }
+                }
+            }
+            let _ = child.kill().await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    async fn handle_systemvolume_request(
+        self: &Arc<Self>,
+        device_id: &str,
+        packet: &Packet,
+    ) {
+        log(&format!(
+            "systemvolume.request from {}: {}",
+            device_id,
+            serde_json::to_string(&packet.body).unwrap_or_default()
+        ));
+        let body = &packet.body;
+        if body
+            .get("requestSinks")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            self.send_sink_list(device_id).await;
+            return;
+        }
+        let Some(name) = body.get("name").and_then(|v| v.as_str()) else {
+            return;
+        };
+        let name = name.to_string();
+        if let Some(v) = body.get("volume").and_then(|v| v.as_i64()) {
+            // Slider drags arrive as a packet stream; only the newest
+            // value matters. Queue it and let the apply worker drain.
+            let spawn_worker = {
+                let mut inner = self.inner.lock().await;
+                inner.sink_pending.insert(name.clone(), v);
+                inner.sink_applying.insert(name.clone())
+            };
+            if spawn_worker {
+                let d = self.clone();
+                tokio::spawn(async move { d.apply_sink_volume(name).await });
+            }
+        } else if let Some(m) = body.get("muted").and_then(|v| v.as_bool()) {
+            self.pactl(&["set-sink-mute", &name, if m { "1" } else { "0" }])
+                .await;
+            log(&format!("systemvolume {} muted={}", name, m));
+            {
+                let mut inner = self.inner.lock().await;
+                if let Some(s) = inner.sinks.iter_mut().find(|s| s.name == name) {
+                    s.muted = m;
+                }
+            }
+            self.mpris_broadcast(Packet::new(
+                "kdeconnect.systemvolume",
+                json!({ "name": name, "muted": m }),
+            ))
+            .await;
+        } else if body
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            self.pactl(&["set-default-sink", &name]).await;
+            log(&format!("systemvolume default -> {}", name));
+            self.sink_refresh_and_broadcast().await;
+        }
+    }
+
+    /// Drain queued volume values for one sink, newest first-class:
+    /// intermediate drag values are dropped, so the sink tracks the
+    /// slider instead of replaying its whole history.
+    async fn apply_sink_volume(self: Arc<Self>, name: String) {
+        loop {
+            let target = {
+                let mut inner = self.inner.lock().await;
+                match inner.sink_pending.remove(&name) {
+                    Some(v) => v,
+                    None => {
+                        inner.sink_applying.remove(&name);
+                        return;
+                    }
+                }
+            };
+            // The phone sends PulseAudio units (0..=65536), like pactl.
+            self.pactl(&["set-sink-volume", &name, &target.to_string()])
+                .await;
+            let was_muted = {
+                let mut inner = self.inner.lock().await;
+                if let Some(s) = inner.sinks.iter_mut().find(|s| s.name == name) {
+                    let was = s.muted;
+                    s.volume = target;
+                    s.muted = false;
+                    was
+                } else {
+                    false
+                }
+            };
+            // Setting the volume unmutes, mirroring the KDE plugin;
+            // only pay the extra call when the sink actually was muted.
+            if was_muted {
+                self.pactl(&["set-sink-mute", &name, "0"]).await;
+            }
+            self.mpris_broadcast(Packet::new(
+                "kdeconnect.systemvolume",
+                json!({ "name": name, "volume": target }),
+            ))
+            .await;
+        }
+    }
+
     // ---- connection lifecycle ----------------------------------------------
 
     async fn register_channel(
@@ -1055,6 +1950,16 @@ impl Daemon {
                 ),
             )
             .await;
+            self.mpris_send_all_to(&device_id).await;
+            self.send_packet(
+                &device_id,
+                Packet::new(
+                    "kdeconnect.mpris.request",
+                    json!({ "requestPlayerList": true }),
+                ),
+            )
+            .await;
+            self.send_sink_list(&device_id).await;
             if let Some(handle) = &self.clipboard {
                 let current = handle.current.lock().unwrap().clone();
                 if let Some(content) = current {
@@ -1560,6 +2465,11 @@ async fn run_daemon() -> Result<()> {
             subscribers: Vec::new(),
             notif_ids: HashMap::new(),
             notif_routes: HashMap::new(),
+            mpris_players: HashMap::new(),
+            mpris_art_sent: HashMap::new(),
+            sinks: Vec::new(),
+            sink_pending: HashMap::new(),
+            sink_applying: std::collections::HashSet::new(),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
@@ -1583,6 +2493,8 @@ async fn run_daemon() -> Result<()> {
         dir.join("control.sock"),
     ));
     tokio::spawn(daemon.clone().notif_signal_loop());
+    tokio::spawn(daemon.clone().mpris_bridge_loop());
+    tokio::spawn(daemon.clone().sink_watch_loop());
     {
         let d = daemon.clone();
         tokio::spawn(async move {
@@ -1727,4 +2639,61 @@ trait Notifications {
     fn notification_replied(&self, id: u32, text: &str) -> zbus::Result<()>;
     #[zbus(signal)]
     fn notification_closed(&self, id: u32, reason: u32) -> zbus::Result<()>;
+}
+
+fn ov_str(v: &zbus::zvariant::OwnedValue) -> String {
+    use zbus::zvariant::Value;
+    match &**v {
+        Value::Str(s) => s.to_string(),
+        Value::ObjectPath(p) => p.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn ov_str_list(v: &zbus::zvariant::OwnedValue) -> String {
+    use zbus::zvariant::Value;
+    match &**v {
+        Value::Str(s) => s.to_string(),
+        Value::Array(a) => a
+            .iter()
+            .filter_map(|e| match e {
+                Value::Str(s) => Some(s.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => String::new(),
+    }
+}
+
+fn ov_i64(v: &zbus::zvariant::OwnedValue) -> i64 {
+    use zbus::zvariant::Value;
+    match &**v {
+        Value::I64(x) => *x,
+        Value::U64(x) => *x as i64,
+        Value::I32(x) => *x as i64,
+        Value::U32(x) => *x as i64,
+        _ => 0,
+    }
+}
+
+fn mpris_state_packet(player: &MprisPlayer, pos_ms: i64) -> Packet {
+    Packet::new(
+        "kdeconnect.mpris",
+        json!({
+            "player": player.name,
+            "title": player.title,
+            "artist": player.artist,
+            "album": player.album,
+            "isPlaying": player.is_playing,
+            "pos": pos_ms,
+            "length": player.length_ms,
+            "canPlay": player.can_play,
+            "canPause": player.can_pause,
+            "canGoNext": player.can_next,
+            "canGoPrevious": player.can_prev,
+            "canSeek": player.can_seek,
+            "volume": player.volume,
+        }),
+    )
 }

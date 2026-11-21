@@ -116,6 +116,8 @@ struct Inner {
     phone_players: HashMap<String, HashMap<String, Value>>,
     /// Plugins the user switched off in the app's plugin page.
     plugins_disabled: std::collections::HashSet<String>,
+    /// Presentation remote session state.
+    presenter: PresenterState,
 }
 
 #[derive(Clone, PartialEq)]
@@ -461,11 +463,7 @@ impl Daemon {
                         .unwrap_or(false)
                 };
                 if paired {
-                    log(&format!(
-                        "presenter from {}: {}",
-                        device_id,
-                        serde_json::to_string(&packet.body).unwrap_or_default()
-                    ));
+                    self.handle_presenter(&packet.body).await;
                 }
             }
             "kdeconnect.sftp" => {
@@ -3059,6 +3057,7 @@ async fn run_daemon() -> Result<()> {
             presenter_monitor: load_presenter_monitor(&dir),
             phone_players: HashMap::new(),
             plugins_disabled: load_plugins_disabled(&dir),
+            presenter: PresenterState::default(),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
@@ -3086,6 +3085,7 @@ async fn run_daemon() -> Result<()> {
     tokio::spawn(daemon.clone().notif_signal_loop());
     tokio::spawn(daemon.clone().mpris_bridge_loop());
     tokio::spawn(daemon.clone().sink_watch_loop());
+    tokio::spawn(daemon.clone().presenter_pointer_loop());
     {
         let d = daemon.clone();
         tokio::spawn(async move {
@@ -3614,6 +3614,209 @@ impl Daemon {
             }
             let _ = tokio::fs::remove_dir(&path).await;
             log(&format!("startup sweep: removed stale mount {}", mp));
+        }
+    }
+}
+
+/// Pixels of cursor travel per unit of presenter delta.
+const PRESENTER_SENS: f64 = 1200.0;
+
+#[derive(Default)]
+struct PresenterState {
+    acc_x: f64,
+    acc_y: f64,
+    session: bool,
+    pos_x: f64,
+    pos_y: f64,
+    /// x, y, logical width, logical height of the session monitor.
+    rect: (i64, i64, i64, i64),
+    last_packet: Option<std::time::Instant>,
+}
+
+struct Mon {
+    name: String,
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+    focused: bool,
+}
+
+fn hyprctl_cmd() -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("hyprctl");
+    let runtime = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| format!("/run/user/{}", unsafe { libc::getuid() }));
+    cmd.env("XDG_RUNTIME_DIR", &runtime);
+    if let Ok(rd) = std::fs::read_dir(format!("{}/hypr", runtime)) {
+        for entry in rd.flatten() {
+            cmd.env(
+                "HYPRLAND_INSTANCE_SIGNATURE",
+                entry.file_name().to_string_lossy().to_string(),
+            );
+            break;
+        }
+    }
+    cmd
+}
+
+async fn hypr_dispatch(expr: &str) {
+    let _ = hyprctl_cmd()
+        .args(["dispatch", expr])
+        .output()
+        .await;
+}
+
+async fn hypr_monitors() -> Vec<Mon> {
+    let Ok(out) = hyprctl_cmd().args(["monitors", "-j"]).output().await else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_slice::<Value>(&out.stdout) else {
+        return Vec::new();
+    };
+    v.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    let scale = m["scale"].as_f64().unwrap_or(1.0);
+                    Some(Mon {
+                        name: m["name"].as_str()?.to_string(),
+                        x: m["x"].as_i64().unwrap_or(0),
+                        y: m["y"].as_i64().unwrap_or(0),
+                        w: (m["width"].as_f64()? / scale).round() as i64,
+                        h: (m["height"].as_f64()? / scale).round() as i64,
+                        focused: m["focused"].as_bool().unwrap_or(false),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn send_key(code: u32) {
+    let runtime = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| format!("/run/user/{}", unsafe { libc::getuid() }));
+    let _ = tokio::process::Command::new("ydotool")
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .args(["key", &format!("{}:1", code), &format!("{}:0", code)])
+        .output()
+        .await;
+}
+
+impl Daemon {
+    async fn handle_presenter(self: &Arc<Self>, body: &Value) {
+        if body["stop"].as_bool() == Some(true) {
+            let mut inner = self.inner.lock().await;
+            if inner.presenter.session {
+                inner.presenter.session = false;
+                inner.presenter.acc_x = 0.0;
+                inner.presenter.acc_y = 0.0;
+                log("presenter session stopped");
+            }
+            return;
+        }
+        if body["next"].as_bool() == Some(true) {
+            log("presenter: next slide");
+            send_key(106).await; // KEY_RIGHT
+            return;
+        }
+        if body["previous"].as_bool() == Some(true) {
+            log("presenter: previous slide");
+            send_key(105).await; // KEY_LEFT
+            return;
+        }
+        let (Some(dx), Some(dy)) = (body["dx"].as_f64(), body["dy"].as_f64())
+        else {
+            log(&format!(
+                "presenter packet (unhandled shape): {}",
+                serde_json::to_string(body).unwrap_or_default()
+            ));
+            return;
+        };
+        let start = {
+            let mut inner = self.inner.lock().await;
+            inner.presenter.acc_x += dx;
+            inner.presenter.acc_y += dy;
+            inner.presenter.last_packet = Some(std::time::Instant::now());
+            !inner.presenter.session
+        };
+        if start {
+            self.presenter_begin_session().await;
+        }
+    }
+
+    async fn presenter_begin_session(self: &Arc<Self>) {
+        let monitors = hypr_monitors().await;
+        if monitors.is_empty() {
+            log("presenter: no monitors reported by hyprctl");
+            return;
+        }
+        let wanted = {
+            let inner = self.inner.lock().await;
+            inner.presenter_monitor.clone()
+        };
+        let pick = wanted
+            .as_ref()
+            .and_then(|w| monitors.iter().find(|m| &m.name == w))
+            .or_else(|| monitors.iter().find(|m| !m.name.starts_with("eDP")))
+            .or_else(|| monitors.iter().find(|m| m.focused))
+            .unwrap_or(&monitors[0]);
+        let (cx, cy) = (pick.x + pick.w / 2, pick.y + pick.h / 2);
+        {
+            let mut inner = self.inner.lock().await;
+            let p = &mut inner.presenter;
+            p.session = true;
+            p.pos_x = cx as f64;
+            p.pos_y = cy as f64;
+            p.rect = (pick.x, pick.y, pick.w, pick.h);
+        }
+        hypr_dispatch(&format!(
+            "hl.dsp.cursor.move({{ x = {}, y = {} }})",
+            cx, cy
+        ))
+        .await;
+        log(&format!("presenter session started on {}", pick.name));
+    }
+
+    /// Applies accumulated pointer deltas at ~50 Hz so a burst of
+    /// gyro packets becomes one cursor move, clamped to the
+    /// session monitor.
+    async fn presenter_pointer_loop(self: Arc<Self>) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let step = {
+                let mut inner = self.inner.lock().await;
+                let p = &mut inner.presenter;
+                if p.session
+                    && p.last_packet
+                        .map(|t| t.elapsed() > std::time::Duration::from_secs(10))
+                        .unwrap_or(false)
+                {
+                    p.session = false;
+                    p.acc_x = 0.0;
+                    p.acc_y = 0.0;
+                    log("presenter session timed out");
+                }
+                if !p.session || (p.acc_x == 0.0 && p.acc_y == 0.0) {
+                    None
+                } else {
+                    let (dx, dy) = (p.acc_x, p.acc_y);
+                    p.acc_x = 0.0;
+                    p.acc_y = 0.0;
+                    let (rx, ry, rw, rh) = p.rect;
+                    p.pos_x = (p.pos_x + dx * PRESENTER_SENS)
+                        .clamp(rx as f64, (rx + rw - 1) as f64);
+                    p.pos_y = (p.pos_y + dy * PRESENTER_SENS)
+                        .clamp(ry as f64, (ry + rh - 1) as f64);
+                    Some((p.pos_x.round() as i64, p.pos_y.round() as i64))
+                }
+            };
+            if let Some((x, y)) = step {
+                hypr_dispatch(&format!(
+                    "hl.dsp.cursor.move({{ x = {}, y = {} }})",
+                    x, y
+                ))
+                .await;
+            }
         }
     }
 }

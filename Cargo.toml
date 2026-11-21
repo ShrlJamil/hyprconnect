@@ -34,3 +34,4 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 libc = "0.2"
 zbus = { version = "5", features = ["tokio"] }
+futures-lite = "2"

@@ -88,6 +88,15 @@ struct Inner {
     subscribers: Vec<mpsc::Sender<String>>,
     /// Phone notification id -> desktop notification id.
     notif_ids: HashMap<String, u32>,
+    /// Desktop notification id -> where its actions and replies go.
+    notif_routes: HashMap<u32, NotifRoute>,
+}
+
+#[derive(Clone)]
+struct NotifRoute {
+    device_id: String,
+    phone_id: String,
+    reply_id: Option<String>,
 }
 
 struct Daemon {
@@ -714,7 +723,11 @@ impl Daemon {
         if body.get("isCancel").and_then(|v| v.as_bool()).unwrap_or(false) {
             let desktop_id = {
                 let mut inner = self.inner.lock().await;
-                inner.notif_ids.remove(&notif_id)
+                let id = inner.notif_ids.remove(&notif_id);
+                if let Some(id) = id {
+                    inner.notif_routes.remove(&id);
+                }
+                id
             };
             if let Some(desktop_id) = desktop_id {
                 if let Ok(conn) = self.notify_conn().await {
@@ -726,9 +739,19 @@ impl Daemon {
             }
             return;
         }
-        if body.get("silent").and_then(|v| v.as_bool()).unwrap_or(false) {
-            log(&format!("notification {} is silent, not showing", notif_id));
-            return;
+        // The phone marks resent (already-seen) notifications as
+        // silent. They still belong on the desktop, just quietly:
+        // show them with low urgency instead of dropping them,
+        // which is how the reference implementation treats them.
+        let silent = body
+            .get("silent")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if silent {
+            log(&format!(
+                "notification {} is a silent resend, showing quietly",
+                notif_id
+            ));
         }
         // Icon payload, if any: same payload channel rules as files.
         let mut icon_path = String::new();
@@ -770,6 +793,33 @@ impl Daemon {
             let inner = self.inner.lock().await;
             inner.notif_ids.get(&notif_id).copied().unwrap_or(0)
         };
+        // Forward the phone's action buttons (the action id is the
+        // label itself, which is how the phone matches them), plus
+        // the freedesktop inline-reply action when the notification
+        // can be replied to.
+        let reply_id = body
+            .get("requestReplyId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let mut action_pairs: Vec<String> = Vec::new();
+        if let Some(actions) = body.get("actions").and_then(|v| v.as_array()) {
+            for a in actions {
+                if let Some(label) = a.as_str() {
+                    action_pairs.push(label.to_string());
+                    action_pairs.push(label.to_string());
+                }
+            }
+        }
+        if reply_id.is_some() {
+            action_pairs.push("inline-reply".to_string());
+            action_pairs.push("Reply".to_string());
+        }
+        let action_refs: Vec<&str> = action_pairs.iter().map(|s| s.as_str()).collect();
+        let mut hints: HashMap<&str, zbus::zvariant::Value> = HashMap::new();
+        hints.insert(
+            "urgency",
+            zbus::zvariant::Value::U8(if silent { 0 } else { 1 }),
+        );
         match self.notify_conn().await {
             Ok(conn) => match NotificationsProxy::new(&conn).await {
                 Ok(proxy) => {
@@ -780,8 +830,8 @@ impl Daemon {
                             &icon_path,
                             &summary,
                             &body_text,
-                            Vec::new(),
-                            HashMap::new(),
+                            action_refs,
+                            hints,
                             -1,
                         )
                         .await
@@ -789,6 +839,14 @@ impl Daemon {
                         Ok(desktop_id) => {
                             let mut inner = self.inner.lock().await;
                             inner.notif_ids.insert(notif_id.clone(), desktop_id);
+                            inner.notif_routes.insert(
+                                desktop_id,
+                                NotifRoute {
+                                    device_id: device_id.to_string(),
+                                    phone_id: notif_id.clone(),
+                                    reply_id: reply_id.clone(),
+                                },
+                            );
                             log(&format!(
                                 "notification {} shown on desktop as {}",
                                 notif_id, desktop_id
@@ -838,6 +896,98 @@ impl Daemon {
             data.extend_from_slice(&buf[..n]);
         }
         Ok(data)
+    }
+
+    /// Listen for action clicks and inline replies from the desktop
+    /// notification server and route them back to the phone.
+    async fn notif_signal_loop(self: Arc<Self>) {
+        loop {
+            if let Err(e) = self.notif_signals_once().await {
+                log(&format!("notification signals failed: {:#}", e));
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+
+    async fn notif_signals_once(&self) -> Result<()> {
+        use futures_lite::StreamExt;
+        let conn = self.notify_conn().await?;
+        let proxy = NotificationsProxy::new(&conn).await?;
+        let mut actions = proxy.receive_action_invoked().await?;
+        let mut replies = proxy.receive_notification_replied().await?;
+        let mut closeds = proxy.receive_notification_closed().await?;
+        log("notification action/reply listener active");
+        loop {
+            tokio::select! {
+                Some(sig) = actions.next() => {
+                    if let Ok(args) = sig.args() {
+                        self.on_action_invoked(args.id, args.action_key).await;
+                    }
+                }
+                Some(sig) = replies.next() => {
+                    if let Ok(args) = sig.args() {
+                        self.on_notification_reply(args.id, args.text).await;
+                    }
+                }
+                Some(sig) = closeds.next() => {
+                    if let Ok(args) = sig.args() {
+                        let mut inner = self.inner.lock().await;
+                        if let Some(route) = inner.notif_routes.remove(&args.id) {
+                            inner.notif_ids.remove(&route.phone_id);
+                        }
+                    }
+                }
+                else => break,
+            }
+        }
+        Ok(())
+    }
+
+    async fn on_action_invoked(&self, desktop_id: u32, action_key: &str) {
+        if action_key == "default" || action_key == "inline-reply" {
+            return;
+        }
+        let route = {
+            let inner = self.inner.lock().await;
+            inner.notif_routes.get(&desktop_id).cloned()
+        };
+        if let Some(route) = route {
+            self.send_packet(
+                &route.device_id,
+                Packet::new(
+                    "kdeconnect.notification.action",
+                    json!({ "id": route.phone_id, "action": action_key }),
+                ),
+            )
+            .await;
+            log(&format!(
+                "notification action '{}' routed to {}",
+                action_key, route.device_id
+            ));
+        }
+    }
+
+    async fn on_notification_reply(&self, desktop_id: u32, text: &str) {
+        let route = {
+            let inner = self.inner.lock().await;
+            inner.notif_routes.get(&desktop_id).cloned()
+        };
+        if let Some(route) = route {
+            if let Some(reply_id) = &route.reply_id {
+                self.send_packet(
+                    &route.device_id,
+                    Packet::new(
+                        "kdeconnect.notification.reply",
+                        json!({ "requestReplyId": reply_id, "message": text }),
+                    ),
+                )
+                .await;
+                log(&format!(
+                    "notification reply routed to {}",
+                    route.device_id
+                ));
+            }
+        }
     }
 
     // ---- connection lifecycle ----------------------------------------------
@@ -1409,6 +1559,7 @@ async fn run_daemon() -> Result<()> {
             trust,
             subscribers: Vec::new(),
             notif_ids: HashMap::new(),
+            notif_routes: HashMap::new(),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
@@ -1431,6 +1582,7 @@ async fn run_daemon() -> Result<()> {
         daemon.clone(),
         dir.join("control.sock"),
     ));
+    tokio::spawn(daemon.clone().notif_signal_loop());
     {
         let d = daemon.clone();
         tokio::spawn(async move {
@@ -1569,4 +1721,10 @@ trait Notifications {
         expire_timeout: i32,
     ) -> zbus::Result<u32>;
     fn close_notification(&self, id: u32) -> zbus::Result<()>;
+    #[zbus(signal)]
+    fn action_invoked(&self, id: u32, action_key: &str) -> zbus::Result<()>;
+    #[zbus(signal)]
+    fn notification_replied(&self, id: u32, text: &str) -> zbus::Result<()>;
+    #[zbus(signal)]
+    fn notification_closed(&self, id: u32, reason: u32) -> zbus::Result<()>;
 }

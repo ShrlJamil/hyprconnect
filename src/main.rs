@@ -424,7 +424,19 @@ impl Daemon {
                         }
                         match serde_json::from_str::<Packet>(trimmed) {
                             Ok(packet) => {
-                                if packet.ptype != "kdeconnect.identity" {
+                                if packet.ptype == "kdeconnect.identity" {
+                                    // Encrypted identity exchange: the
+                                    // device id must not change mid-channel.
+                                    let claimed =
+                                        packet.body["deviceId"].as_str().unwrap_or("");
+                                    if claimed != read_id {
+                                        log(&format!(
+                                            "identity mismatch on channel to {} (claims {}), closing",
+                                            read_id, claimed
+                                        ));
+                                        break;
+                                    }
+                                } else {
                                     daemon.handle_packet(&read_id, packet).await;
                                 }
                             }
@@ -455,50 +467,55 @@ impl Daemon {
 
 // ---- connection establishment ---------------------------------------------
 
-/// Exchange identity packets over a fresh TLS stream: we send ours at
-/// once, then read the peer's. Returns the peer's device info.
-async fn exchange_identity<S>(
-    daemon: &Daemon,
+/// The protocol's connection opening: the TCP initiator sends its
+/// identity packet in plaintext first. The acceptor reads it, and only
+/// then does TLS start (initiator = TLS server, acceptor = TLS client).
+/// Identity is also re-sent over the encrypted channel afterwards and
+/// must name the same device (checked in the read loop).
+async fn send_plaintext_identity<S>(daemon: &Daemon, stream: &mut S) -> Result<()>
+where
+    S: tokio::io::AsyncWrite + Unpin,
+{
+    let packet = Packet::identity(&daemon.identity, daemon.tcp_port);
+    stream
+        .write_all(packet.to_line().as_bytes())
+        .await
+        .context("send plaintext identity")?;
+    Ok(())
+}
+
+async fn read_plaintext_identity<S>(
     stream: &mut S,
-    peer_cert_der: &[u8],
     remote_ip: IpAddr,
 ) -> Result<DeviceInfo>
 where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    S: tokio::io::AsyncRead + Unpin,
 {
-    let identity_packet = Packet::identity(&daemon.identity, daemon.tcp_port);
-    stream
-        .write_all(identity_packet.to_line().as_bytes())
-        .await
-        .context("send identity")?;
-
-    let mut reader = BufReader::new(&mut *stream);
+    let mut reader = BufReader::new(stream);
     let mut line = String::new();
     let n = tokio::time::timeout(
         Duration::from_secs(10),
         reader.read_line(&mut line),
     )
     .await
-    .context("identity exchange timed out")??;
+    .context("plaintext identity timed out")??;
     if n == 0 {
-        anyhow::bail!("peer closed during identity exchange");
+        anyhow::bail!("peer closed before plaintext identity");
+    }
+    if line.len() > 8192 {
+        anyhow::bail!("plaintext identity too large");
     }
     let packet: Packet = serde_json::from_str(line.trim())?;
     if packet.ptype != "kdeconnect.identity" {
         anyhow::bail!("first packet is not identity: {}", packet.ptype);
     }
-    let body = &packet.body;
+    device_info_from_identity(&packet.body, remote_ip)
+}
+
+fn device_info_from_identity(body: &Value, remote_ip: IpAddr) -> Result<DeviceInfo> {
     let device_id = body["deviceId"].as_str().context("identity deviceId")?;
     if !identity::valid_device_id(device_id) {
         anyhow::bail!("invalid device id {:?}", device_id);
-    }
-    let (cn, spki) = identity::cert_info(peer_cert_der)?;
-    if cn != device_id {
-        anyhow::bail!(
-            "certificate CN {} does not match identity deviceId {}",
-            cn,
-            device_id
-        );
     }
     let mut info = DeviceInfo::new(device_id);
     info.name = body["deviceName"].as_str().unwrap_or("").to_string();
@@ -506,23 +523,47 @@ where
     info.last_ip = Some(remote_ip);
     info.last_tcp_port = body["tcpPort"].as_u64().map(|p| p as u16);
     info.last_seen = Some(Instant::now());
+    Ok(info)
+}
+
+/// Validate the peer certificate against the identity we already have:
+/// the certificate common name must be the device id.
+fn attach_cert(info: &mut DeviceInfo, peer_cert_der: &[u8]) -> Result<()> {
+    let (cn, spki) = identity::cert_info(peer_cert_der)?;
+    if cn != info.id {
+        anyhow::bail!(
+            "certificate CN {} does not match identity deviceId {}",
+            cn,
+            info.id
+        );
+    }
     info.peer_spki = spki;
     info.peer_cert = peer_cert_der.to_vec();
-    Ok(info)
+    Ok(())
 }
 
 async fn connect_to(daemon: Arc<Daemon>, device_id: String, ip: IpAddr, port: u16) {
     let result = async {
-        let tcp = TcpStream::connect((ip, port))
+        let mut tcp = TcpStream::connect((ip, port))
             .await
             .context("TCP connect")?;
-        // We opened the TCP connection, so we act as the TLS server.
-        let (mut stream, peer_cert) =
+        // We opened the TCP connection: send our identity in plaintext
+        // first, then act as the TLS server.
+        send_plaintext_identity(&daemon, &mut tcp).await?;
+        let (stream, peer_cert) =
             tls::handshake_as_server(tcp, &daemon.identity).await?;
-        let info = exchange_identity(&daemon, &mut stream, &peer_cert, ip).await?;
-        if info.id != device_id {
-            anyhow::bail!("connected to unexpected device {}", info.id);
-        }
+        let mut info = {
+            let inner = daemon.inner.lock().await;
+            inner
+                .devices
+                .get(&device_id)
+                .cloned()
+                .unwrap_or_else(|| DeviceInfo::new(&device_id))
+        };
+        info.last_ip = Some(ip);
+        info.last_tcp_port = Some(port);
+        info.last_seen = Some(Instant::now());
+        attach_cert(&mut info, &peer_cert)?;
         // Authenticate trusted devices by their stored certificate.
         {
             let inner = daemon.inner.lock().await;
@@ -570,20 +611,14 @@ async fn maybe_connect(daemon: &Arc<Daemon>, device_id: &str) {
 
 async fn handle_incoming(daemon: Arc<Daemon>, tcp: TcpStream, remote: SocketAddr) {
     let result = async {
-        // We accepted the TCP connection, so we act as the TLS client.
-        // SNI names the expected peer when we can guess it from the IP.
-        let guessed_name = {
-            let inner = daemon.inner.lock().await;
-            inner
-                .devices
-                .values()
-                .find(|d| d.last_ip == Some(remote.ip()))
-                .map(|d| d.id.clone())
-        };
-        let server_name = guessed_name.as_deref().unwrap_or(&daemon.identity.device_id);
-        let (mut stream, peer_cert) =
-            tls::handshake_as_client(tcp, &daemon.identity, server_name).await?;
-        let info = exchange_identity(&daemon, &mut stream, &peer_cert, remote.ip()).await?;
+        // The TCP initiator speaks first: read its plaintext identity,
+        // then act as the TLS client (SNI names that device, as the
+        // protocol expects).
+        let mut tcp = tcp;
+        let mut info = read_plaintext_identity(&mut tcp, remote.ip()).await?;
+        let (stream, peer_cert) =
+            tls::handshake_as_client(tcp, &daemon.identity, &info.id.clone()).await?;
+        attach_cert(&mut info, &peer_cert)?;
         {
             let inner = daemon.inner.lock().await;
             if inner.trust.is_trusted(&info.id)

@@ -1,3 +1,4 @@
+pub mod clipboard;
 pub mod identity;
 pub mod packet;
 pub mod store;

@@ -6,6 +6,7 @@
 //! the GTK app) talk to it there.
 
 use anyhow::{Context, Result};
+use hyprconnect::clipboard;
 use hyprconnect::identity::{self, LocalIdentity};
 use hyprconnect::packet::Packet;
 use hyprconnect::store::{hex_encode, TrustStore, TrustedDevice};
@@ -92,6 +93,8 @@ struct Daemon {
     state: PathBuf,
     tcp_port: u16,
     inner: Mutex<Inner>,
+    clipboard: Option<clipboard::ClipboardHandle>,
+    last_clipboard: Mutex<Option<String>>,
 }
 
 fn log(msg: &str) {
@@ -340,9 +343,81 @@ impl Daemon {
                     .await;
                 }
             }
-            other => {
-                log(&format!("packet {} from {} (ignored in phase 0)", other, device_id));
+            "kdeconnect.clipboard" | "kdeconnect.clipboard.connect" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    if let Some(content) =
+                        packet.body.get("content").and_then(|c| c.as_str())
+                    {
+                        self.apply_remote_clipboard(content).await;
+                    }
+                }
             }
+            other => {
+                log(&format!("packet {} from {} (no handler)", other, device_id));
+            }
+        }
+    }
+
+    /// Clipboard content arrived from a paired device: apply it
+    /// locally unless it is what we already have (echo guard).
+    async fn apply_remote_clipboard(&self, content: &str) {
+        if content.len() > 512_000 {
+            return;
+        }
+        {
+            let mut last = self.last_clipboard.lock().await;
+            if last.as_deref() == Some(content) {
+                return;
+            }
+            *last = Some(content.to_string());
+        }
+        log(&format!("clipboard received ({} chars), applying", content.len()));
+        if let Some(handle) = &self.clipboard {
+            let _ = handle
+                .cmd_tx
+                .send(clipboard::ClipboardCmd::Set(content.to_string()));
+        }
+    }
+
+    /// The local clipboard changed (reported by the Wayland watcher):
+    /// forward it to every paired, connected device.
+    async fn on_local_clipboard_changed(&self, content: String) {
+        if content.len() > 512_000 {
+            return;
+        }
+        let targets: Vec<String> = {
+            let mut last = self.last_clipboard.lock().await;
+            if last.as_deref() == Some(content.as_str()) {
+                return;
+            }
+            *last = Some(content.clone());
+            let inner = self.inner.lock().await;
+            inner
+                .devices
+                .values()
+                .filter(|d| d.paired && d.connected)
+                .map(|d| d.id.clone())
+                .collect()
+        };
+        log(&format!(
+            "local clipboard changed ({} chars), forwarding to {} device(s)",
+            content.len(),
+            targets.len()
+        ));
+        let packet = Packet::new(
+            "kdeconnect.clipboard",
+            json!({ "content": content }),
+        );
+        for id in targets {
+            self.send_packet(&id, packet.clone()).await;
         }
     }
 
@@ -393,6 +468,29 @@ impl Daemon {
         };
         if pending_out {
             self.send_packet(&device_id, Packet::pair(true)).await;
+        }
+        let is_paired = {
+            let inner = self.inner.lock().await;
+            inner
+                .devices
+                .get(&device_id)
+                .map(|d| d.paired)
+                .unwrap_or(false)
+        };
+        if is_paired {
+            if let Some(handle) = &self.clipboard {
+                let current = handle.current.lock().unwrap().clone();
+                if let Some(content) = current {
+                    self.send_packet(
+                        &device_id,
+                        Packet::new(
+                            "kdeconnect.clipboard.connect",
+                            json!({ "content": content }),
+                        ),
+                    )
+                    .await;
+                }
+            }
         }
 
         let (read_half, mut write_half) = tokio::io::split(stream);
@@ -865,6 +963,10 @@ async fn run_daemon() -> Result<()> {
     }
     let listener = listener.context("no free TCP port in protocol range")?;
 
+    let (clip_changed_tx, mut clip_changed_rx) =
+        tokio::sync::mpsc::channel::<String>(16);
+    let clipboard_handle = clipboard::spawn(clip_changed_tx, |msg| log(msg));
+
     let daemon = Arc::new(Daemon {
         identity: identity.clone(),
         state: dir.clone(),
@@ -876,6 +978,8 @@ async fn run_daemon() -> Result<()> {
             trust,
             subscribers: Vec::new(),
         }),
+        clipboard: clipboard_handle,
+        last_clipboard: Mutex::new(None),
     });
 
     log(&format!(
@@ -894,6 +998,14 @@ async fn run_daemon() -> Result<()> {
         daemon.clone(),
         dir.join("control.sock"),
     ));
+    {
+        let d = daemon.clone();
+        tokio::spawn(async move {
+            while let Some(content) = clip_changed_rx.recv().await {
+                d.on_local_clipboard_changed(content).await;
+            }
+        });
+    }
 
     loop {
         let (tcp, remote) = listener.accept().await?;

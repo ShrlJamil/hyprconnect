@@ -1,0 +1,26 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# Secrets and credentials: never commit these
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials*
+*secret*
+.netrc
+
+# Local pairing and runtime state
+*.local.json
+pairing.json
+devices.json
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store

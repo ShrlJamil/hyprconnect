@@ -15,7 +15,7 @@ path = "src/bin/hyprconnect-app.rs"
 required-features = ["gtk-ui"]
 
 [features]
-gtk-ui = ["dep:gtk4"]
+gtk-ui = ["dep:gtk4", "dep:adw"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -30,6 +30,7 @@ x509-parser = "0.16"
 socket2 = "0.5"
 anyhow = "1"
 gtk4 = { version = "0.10", optional = true, features = ["v4_10"] }
+adw = { package = "libadwaita", version = "0.8", optional = true, features = ["v1_5"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 libc = "0.2"

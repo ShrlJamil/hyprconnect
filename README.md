@@ -38,7 +38,7 @@ of scope by design.
 
 ## License
 
-To be decided before the first public release.
+GPL-3.0-or-later. See [LICENSE](LICENSE) for the full text.
 
 ## Development
 

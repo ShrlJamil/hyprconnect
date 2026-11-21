@@ -3073,6 +3073,8 @@ async fn run_daemon() -> Result<()> {
         dir.display()
     ));
 
+    daemon.sweep_stale_mounts().await;
+
     let udp = Arc::new(udp_socket()?);
     tokio::spawn(discovery_task(daemon.clone(), udp.clone()));
     tokio::spawn(announce_task(daemon.clone(), udp));
@@ -3322,9 +3324,18 @@ async fn mount_is_active(mountpoint: &std::path::Path) -> bool {
         return false;
     };
     let mp = mountpoint.to_string_lossy();
-    mounts
-        .lines()
-        .any(|l| l.split_whitespace().nth(1) == Some(mp.as_ref()))
+    mounts.lines().any(|l| {
+        l.split_whitespace()
+            .nth(1)
+            .map(|t| {
+                t.replace("\\040", " ")
+                    .replace("\\011", "\t")
+                    .replace("\\012", "\n")
+                    .replace("\\134", "\\")
+                    == mp.as_ref()
+            })
+            .unwrap_or(false)
+    })
 }
 
 /// Whether a mountpoint actually serves entries right now. A dead
@@ -3535,6 +3546,74 @@ impl Daemon {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+impl Daemon {
+    /// Startup sweep for orphaned SFTP mounts. When a daemon dies,
+    /// systemd takes its sshfs children with it, but the FUSE
+    /// entries stay in the kernel as corpses that answer ENOTCONN
+    /// ("Transport endpoint is not connected") and block the folder
+    /// in every file manager. The new process tracks none of them,
+    /// so before anything else it walks ~/Devices and lazily
+    /// unmounts every sshfs mount that no longer serves.
+    async fn sweep_stale_mounts(&self) {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let root = PathBuf::from(home).join("Devices");
+        let Ok(mut rd) = tokio::fs::read_dir(&root).await else {
+            return;
+        };
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            candidates.push(entry.path());
+        }
+        if candidates.is_empty() {
+            return;
+        }
+        let mounts_text = tokio::fs::read_to_string("/proc/mounts")
+            .await
+            .unwrap_or_default();
+        let sshfs_mounts: Vec<String> = mounts_text
+            .lines()
+            .filter_map(|l| {
+                let mut fields = l.split_whitespace();
+                let _src = fields.next()?;
+                let target = fields.next()?;
+                let fstype = fields.next()?;
+                if fstype == "fuse.sshfs" {
+                    Some(
+                        target
+                            .replace("\\040", " ")
+                            .replace("\\011", "\t")
+                            .replace("\\012", "\n")
+                            .replace("\\134", "\\"),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for path in candidates {
+            let mp = path.to_string_lossy().to_string();
+            if !sshfs_mounts.iter().any(|m| m == &mp) {
+                continue;
+            }
+            if mount_serves(&path).await {
+                continue;
+            }
+            let out = tokio::process::Command::new("fusermount3")
+                .args(["-u", &mp])
+                .output()
+                .await;
+            if !matches!(out, Ok(o) if o.status.success()) {
+                let _ = tokio::process::Command::new("fusermount3")
+                    .args(["-uz", &mp])
+                    .output()
+                    .await;
+            }
+            let _ = tokio::fs::remove_dir(&path).await;
+            log(&format!("startup sweep: removed stale mount {}", mp));
         }
     }
 }

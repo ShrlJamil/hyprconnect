@@ -52,6 +52,14 @@ fn main() {
     app.run();
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum DetailView {
+    Device,
+    Plugins,
+    Encryption,
+    Presentation,
+}
+
 struct AppState {
     window: adw::ApplicationWindow,
     sidebar: ListBox,
@@ -61,6 +69,9 @@ struct AppState {
     last_json: RefCell<String>,
     monitors: RefCell<Vec<String>>,
     presenter_monitor: RefCell<Option<String>>,
+    view: RefCell<DetailView>,
+    plugins: RefCell<std::collections::HashMap<String, bool>>,
+    self_info: RefCell<(String, String)>,
 }
 
 fn build_ui(app: &adw::Application) {
@@ -132,6 +143,9 @@ fn build_ui(app: &adw::Application) {
         last_json: RefCell::new(String::new()),
         monitors: RefCell::new(Vec::new()),
         presenter_monitor: RefCell::new(None),
+        view: RefCell::new(DetailView::Device),
+        plugins: RefCell::new(std::collections::HashMap::new()),
+        self_info: RefCell::new((String::new(), String::new())),
     });
 
     let st = state.clone();
@@ -145,6 +159,7 @@ fn build_ui(app: &adw::Application) {
                 .and_then(|d| d["deviceId"].as_str().map(|s| s.to_string()));
             if id.is_some() {
                 *st.selected.borrow_mut() = id;
+                *st.view.borrow_mut() = DetailView::Device;
                 rebuild_detail(&st);
             }
         }
@@ -169,6 +184,12 @@ fn refresh(state: Rc<AppState>) {
             return;
         };
         if let Ok(s) = &settings {
+            if let Some(pl) = s["plugins"].as_object() {
+                let mut map = state.plugins.borrow_mut();
+                for (k, v) in pl {
+                    map.insert(k.clone(), v.as_bool().unwrap_or(true));
+                }
+            }
             if let Some(mons) = s["monitors"].as_array() {
                 *state.monitors.borrow_mut() = mons
                     .iter()
@@ -179,6 +200,11 @@ fn refresh(state: Rc<AppState>) {
                 s["presenterMonitor"].as_str().map(|x| x.to_string());
         }
         let Ok(resp) = devices else { return };
+        {
+            let name = resp["self"]["deviceName"].as_str().unwrap_or("").to_string();
+            let id = resp["self"]["deviceId"].as_str().unwrap_or("").to_string();
+            *state.self_info.borrow_mut() = (name, id);
+        }
         let serialized = serde_json::to_string(&resp["devices"]).unwrap_or_default();
         if serialized == *state.last_json.borrow() {
             return;
@@ -309,6 +335,23 @@ fn battery_icon(level: i64, charging: bool) -> String {
     }
 }
 
+fn back_row(state: &Rc<AppState>, title: &str) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    let back = Button::from_icon_name("go-previous-symbolic");
+    back.add_css_class("flat");
+    let st = state.clone();
+    back.connect_clicked(move |_| {
+        *st.view.borrow_mut() = DetailView::Device;
+        rebuild_detail(&st);
+    });
+    row.append(&back);
+    let l = Label::new(Some(title));
+    l.add_css_class("title-3");
+    l.set_halign(gtk4::Align::Start);
+    row.append(&l);
+    row
+}
+
 fn rebuild_detail(state: &Rc<AppState>) {
     clear_box(&state.detail);
     let devices = state.devices.borrow();
@@ -330,11 +373,29 @@ fn rebuild_detail(state: &Rc<AppState>) {
         return;
     };
 
+    let paired = dev["paired"].as_bool().unwrap_or(false);
+    if paired {
+        match *state.view.borrow() {
+            DetailView::Plugins => {
+                build_plugins_view(state, &dev);
+                return;
+            }
+            DetailView::Encryption => {
+                build_encryption_view(state, &dev);
+                return;
+            }
+            DetailView::Presentation => {
+                build_presentation_view(state, &dev);
+                return;
+            }
+            DetailView::Device => {}
+        }
+    }
+
     let id = dev["deviceId"].as_str().unwrap_or("").to_string();
     let name = dev["name"].as_str().unwrap_or("(unknown)").trim().to_string();
     let dtype = dev["type"].as_str().unwrap_or("");
     let connected = dev["connected"].as_bool().unwrap_or(false);
-    let paired = dev["paired"].as_bool().unwrap_or(false);
     let pending_in = dev["pendingIn"].as_bool().unwrap_or(false);
     let pending_out = dev["pendingOut"].as_bool().unwrap_or(false);
     let mounted = dev["mounted"].as_bool().unwrap_or(false);
@@ -342,7 +403,7 @@ fn rebuild_detail(state: &Rc<AppState>) {
     let battery = dev["battery"].as_i64();
     let battery_charging = dev["batteryCharging"].as_bool().unwrap_or(false);
 
-    // Header: icon, name, status, battery on the right.
+    // Header: icon, name, status, battery, overflow menu.
     let head = GtkBox::new(Orientation::Horizontal, 14);
     let icon = Image::from_icon_name(device_icon(dtype));
     icon.set_pixel_size(56);
@@ -358,10 +419,10 @@ fn rebuild_detail(state: &Rc<AppState>) {
     status.set_halign(gtk4::Align::Start);
     head_texts.append(&status);
     head.append(&head_texts);
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    head.append(&spacer);
     if let Some(level) = battery {
-        let spacer = GtkBox::new(Orientation::Horizontal, 0);
-        spacer.set_hexpand(true);
-        head.append(&spacer);
         let bat = GtkBox::new(Orientation::Horizontal, 6);
         bat.set_valign(gtk4::Align::Center);
         let bicon = Image::from_icon_name(&battery_icon(level, battery_charging));
@@ -375,6 +436,53 @@ fn rebuild_detail(state: &Rc<AppState>) {
             bat.append(&ch);
         }
         head.append(&bat);
+    }
+    if paired {
+        let group = gtk4::gio::SimpleActionGroup::new();
+        let ping_action = gtk4::gio::SimpleAction::new("ping", None);
+        {
+            let id2 = id.clone();
+            ping_action.connect_activate(move |_, _| {
+                send_request(json!({"cmd": "ping", "deviceId": id2, "message": "Ping from HyprConnect"}));
+            });
+        }
+        group.add_action(&ping_action);
+        let plugins_action = gtk4::gio::SimpleAction::new("plugins", None);
+        {
+            let st = state.clone();
+            plugins_action.connect_activate(move |_, _| {
+                *st.view.borrow_mut() = DetailView::Plugins;
+                rebuild_detail(&st);
+            });
+        }
+        group.add_action(&plugins_action);
+        let enc_action = gtk4::gio::SimpleAction::new("encryption", None);
+        {
+            let st = state.clone();
+            enc_action.connect_activate(move |_, _| {
+                *st.view.borrow_mut() = DetailView::Encryption;
+                rebuild_detail(&st);
+            });
+        }
+        group.add_action(&enc_action);
+        let unpair_action = gtk4::gio::SimpleAction::new("unpair", None);
+        {
+            let id2 = id.clone();
+            unpair_action.connect_activate(move |_, _| send_command("unpair", &id2));
+        }
+        group.add_action(&unpair_action);
+        head.insert_action_group("device", Some(&group));
+        let menu = gtk4::gio::Menu::new();
+        menu.append(Some("Send ping"), Some("device.ping"));
+        menu.append(Some("Plugin settings"), Some("device.plugins"));
+        menu.append(Some("Encryption info"), Some("device.encryption"));
+        menu.append(Some("Unpair"), Some("device.unpair"));
+        let mb = gtk4::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .menu_model(&menu)
+            .build();
+        mb.set_valign(gtk4::Align::Center);
+        head.append(&mb);
     }
     state.detail.append(&head);
 
@@ -392,8 +500,6 @@ fn rebuild_detail(state: &Rc<AppState>) {
         state.detail.append(&group);
     }
 
-    // Pairing actions are plain buttons; the control surface below
-    // is for paired devices.
     if pending_in || pending_out || !paired {
         let buttons = GtkBox::new(Orientation::Horizontal, 8);
         if pending_in {
@@ -430,11 +536,6 @@ fn rebuild_detail(state: &Rc<AppState>) {
         note.set_halign(gtk4::Align::Start);
         note.set_wrap(true);
         state.detail.append(&note);
-        let unpair = Button::with_label("Unpair");
-        unpair.set_halign(gtk4::Align::Start);
-        let id2 = id.clone();
-        unpair.connect_clicked(move |_| send_command("unpair", &id2));
-        state.detail.append(&unpair);
         return;
     }
 
@@ -446,15 +547,6 @@ fn rebuild_detail(state: &Rc<AppState>) {
     flow.set_max_children_per_line(4);
     flow.set_column_spacing(8);
     flow.set_row_spacing(8);
-
-    let ping = tile("dialog-information-symbolic", "Ping");
-    {
-        let id2 = id.clone();
-        ping.connect_clicked(move |_| {
-            send_request(json!({"cmd": "ping", "deviceId": id2, "message": "Ping from HyprConnect"}));
-        });
-    }
-    flow.append(&ping);
 
     let send = tile("document-send-symbolic", "Send file…");
     {
@@ -503,6 +595,16 @@ fn rebuild_detail(state: &Rc<AppState>) {
         ring.connect_clicked(move |_| send_command("ring", &id2));
     }
     flow.append(&ring);
+
+    let present = tile("video-display-symbolic", "Presentation remote");
+    {
+        let st = state.clone();
+        present.connect_clicked(move |_| {
+            *st.view.borrow_mut() = DetailView::Presentation;
+            rebuild_detail(&st);
+        });
+    }
+    flow.append(&present);
 
     state.detail.append(&flow);
 
@@ -598,8 +700,59 @@ fn rebuild_detail(state: &Rc<AppState>) {
         }
         state.detail.append(&group);
     }
+}
 
-    // Presentation pointer target (desktop side of the presenter).
+const PLUGIN_META: &[(&str, &str, &str, &str)] = &[
+    ("clipboard", "edit-copy-symbolic", "Clipboard sync", "Copy on one device, paste on the other"),
+    ("share", "document-send-symbolic", "File sharing", "Send and receive files"),
+    ("notification", "preferences-system-notifications-symbolic", "Notifications", "Phone notifications on this desktop, replies included"),
+    ("mpris", "media-playback-start-symbolic", "Multimedia control", "Control players on both devices"),
+    ("systemvolume", "audio-volume-high-symbolic", "System volume", "Desktop sound sinks in the phone's Devices tab"),
+    ("sftp", "folder-remote-symbolic", "Browse device storage", "Mount the phone storage as a drive"),
+    ("presenter", "video-display-symbolic", "Presentation remote", "Use the phone as a presentation pointer"),
+    ("battery", "battery-level-100-symbolic", "Battery status", "Show the phone battery level in the header"),
+    ("findmyphone", "alarm-symbolic", "Find my phone", "Ring the phone from this desktop"),
+];
+
+fn build_plugins_view(state: &Rc<AppState>, _dev: &Value) {
+    state.detail.append(&back_row(state, "Plugin settings"));
+    let group = adw::PreferencesGroup::builder()
+        .description("Disabled plugins stop advertising their packets and drop incoming ones. Changes apply at once; the capability list refreshes on the next connection.")
+        .build();
+    for (key_name, icon, title, subtitle) in PLUGIN_META {
+        let row = adw::SwitchRow::builder()
+            .title(*title)
+            .subtitle(*subtitle)
+            .build();
+        let img = Image::from_icon_name(icon);
+        row.add_prefix(&img);
+        let enabled = state
+            .plugins
+            .borrow()
+            .get(*key_name)
+            .copied()
+            .unwrap_or(true);
+        row.set_active(enabled);
+        {
+            let st = state.clone();
+            let key_owned = key_name.to_string();
+            row.connect_active_notify(move |r| {
+                let want = r.is_active();
+                st.plugins
+                    .borrow_mut()
+                    .insert(key_owned.clone(), want);
+                send_request(json!({"cmd": "set_plugin", "plugin": key_owned, "enabled": want}));
+            });
+        }
+        group.add(&row);
+        if *key_name == "presenter" {
+            group.add(&monitor_combo_row(state));
+        }
+    }
+    state.detail.append(&group);
+}
+
+fn monitor_combo_row(state: &Rc<AppState>) -> adw::ComboRow {
     let monitors = state.monitors.borrow().clone();
     let current_monitor = state.presenter_monitor.borrow().clone();
     let model = gtk4::StringList::new(&[] as &[&str]);
@@ -611,19 +764,14 @@ fn rebuild_detail(state: &Rc<AppState>) {
             selected_idx = (i + 1) as u32;
         }
     }
-    let pres_group = adw::PreferencesGroup::builder()
-        .title("Presentation")
-        .build();
-    let pres_row = adw::ComboRow::builder()
+    let row = adw::ComboRow::builder()
         .title("Pointer monitor")
         .subtitle("Where the presenter pointer appears")
         .model(&model)
         .build();
-    let pres_icon = Image::from_icon_name("video-display-symbolic");
-    pres_row.add_prefix(&pres_icon);
-    pres_row.set_selected(selected_idx);
-    pres_row.connect_selected_notify(move |row| {
-        let idx = row.selected();
+    row.set_selected(selected_idx);
+    row.connect_selected_notify(move |r| {
+        let idx = r.selected();
         let value = if idx == 0 {
             String::new()
         } else {
@@ -634,12 +782,48 @@ fn rebuild_detail(state: &Rc<AppState>) {
         };
         send_request(json!({"cmd": "set_presenter_monitor", "monitor": value}));
     });
-    pres_group.add(&pres_row);
-    state.detail.append(&pres_group);
+    row
+}
 
-    let unpair = Button::with_label("Unpair");
-    unpair.set_halign(gtk4::Align::Start);
-    let id2 = id.clone();
-    unpair.connect_clicked(move |_| send_command("unpair", &id2));
-    state.detail.append(&unpair);
+fn build_encryption_view(state: &Rc<AppState>, dev: &Value) {
+    state.detail.append(&back_row(state, "Encryption info"));
+    let (self_name, self_id) = state.self_info.borrow().clone();
+    let peer_name = dev["name"].as_str().unwrap_or("(unknown)").trim().to_string();
+    let peer_id = dev["deviceId"].as_str().unwrap_or("");
+    let key = dev["verificationKey"].as_str().unwrap_or("");
+    let group = adw::PreferencesGroup::builder()
+        .description("The connection is encrypted with TLS. If both devices show the same verification key, nobody in between can read the traffic.")
+        .build();
+    let r1 = adw::ActionRow::builder()
+        .title(&self_name)
+        .subtitle(&self_id)
+        .build();
+    group.add(&r1);
+    let r2 = adw::ActionRow::builder()
+        .title(&peer_name)
+        .subtitle(peer_id)
+        .build();
+    group.add(&r2);
+    let r3 = adw::ActionRow::builder()
+        .title("Verification key")
+        .subtitle(key)
+        .build();
+    group.add(&r3);
+    state.detail.append(&group);
+}
+
+fn build_presentation_view(state: &Rc<AppState>, _dev: &Value) {
+    state.detail.append(&back_row(state, "Presentation remote"));
+    let group = adw::PreferencesGroup::builder()
+        .description("Open Presentation remote for this device on the phone, then move the phone to move the pointer. Slide buttons on the phone step through the deck.")
+        .build();
+    group.add(&monitor_combo_row(state));
+    state.detail.append(&group);
+    let note = Label::new(Some(
+        "Presenter notes and slide previews arrive with the HyprConnect mobile app.",
+    ));
+    note.add_css_class("dim-label");
+    note.set_halign(gtk4::Align::Start);
+    note.set_wrap(true);
+    state.detail.append(&note);
 }

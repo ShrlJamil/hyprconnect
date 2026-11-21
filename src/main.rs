@@ -8,7 +8,7 @@
 use anyhow::{Context, Result};
 use hyprconnect::clipboard;
 use hyprconnect::identity::{self, LocalIdentity};
-use hyprconnect::packet::Packet;
+use hyprconnect::packet::{plugin_for_packet, Packet, PLUGIN_NAMES};
 use hyprconnect::store::{hex_encode, TrustStore, TrustedDevice};
 use hyprconnect::{tls, identity::state_dir};
 use serde_json::{json, Value};
@@ -80,7 +80,7 @@ impl DeviceInfo {
             v["battery"] = json!(level);
             v["batteryCharging"] = json!(self.battery_charging);
         }
-        if (self.pending_in || self.pending_out) && !self.peer_spki.is_empty() {
+        if !self.peer_spki.is_empty() {
             v["verificationKey"] =
                 json!(identity::verification_key(local_spki, &self.peer_spki));
         }
@@ -114,6 +114,8 @@ struct Inner {
     presenter_monitor: Option<String>,
     /// The phone's own media players: device id -> player -> state.
     phone_players: HashMap<String, HashMap<String, Value>>,
+    /// Plugins the user switched off in the app's plugin page.
+    plugins_disabled: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -176,10 +178,25 @@ impl Daemon {
 
     async fn send_packet(&self, device_id: &str, packet: Packet) -> bool {
         let inner = self.inner.lock().await;
+        if let Some(plugin) = plugin_for_packet(packet.ptype.as_str()) {
+            if inner.plugins_disabled.contains(plugin) {
+                return false;
+            }
+        }
         match inner.channels.get(device_id) {
             Some(tx) => tx.send(packet).await.is_ok(),
             None => false,
         }
+    }
+
+    async fn plugin_on(&self, plugin: &str) -> bool {
+        let inner = self.inner.lock().await;
+        !inner.plugins_disabled.contains(plugin)
+    }
+
+    async fn disabled_set(&self) -> std::collections::HashSet<String> {
+        let inner = self.inner.lock().await;
+        inner.plugins_disabled.clone()
     }
 
     async fn device_snapshot(&self) -> Vec<Value> {
@@ -320,6 +337,15 @@ impl Daemon {
     // ---- packet handling ---------------------------------------------------
 
     async fn handle_packet(self: &Arc<Self>, device_id: &str, packet: Packet) {
+        if let Some(plugin) = plugin_for_packet(packet.ptype.as_str()) {
+            if !self.plugin_on(plugin).await {
+                log(&format!(
+                    "packet {} from {} dropped (plugin {} disabled)",
+                    packet.ptype, device_id, plugin
+                ));
+                return;
+            }
+        }
         match packet.ptype.as_str() {
             "kdeconnect.pair" => {
                 let pair = packet.body["pair"].as_bool().unwrap_or(false);
@@ -2473,7 +2499,8 @@ async fn send_plaintext_identity<S>(daemon: &Daemon, stream: &mut S) -> Result<(
 where
     S: tokio::io::AsyncWrite + Unpin,
 {
-    let packet = Packet::identity(&daemon.identity, daemon.tcp_port);
+    let disabled = daemon.disabled_set().await;
+    let packet = Packet::identity(&daemon.identity, daemon.tcp_port, &disabled);
     stream
         .write_all(packet.to_line().as_bytes())
         .await
@@ -2696,7 +2723,8 @@ async fn discovery_task(daemon: Arc<Daemon>, udp: Arc<UdpSocket>) {
 async fn announce_task(daemon: Arc<Daemon>, udp: Arc<UdpSocket>) {
     let target = SocketAddr::from(([255, 255, 255, 255], UDP_PORT));
     loop {
-        let packet = Packet::identity(&daemon.identity, daemon.tcp_port);
+        let disabled = daemon.disabled_set().await;
+        let packet = Packet::identity(&daemon.identity, daemon.tcp_port, &disabled);
         let data = serde_json::to_vec(&packet).unwrap_or_default();
         let _ = udp.send_to(&data, target).await;
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -2882,11 +2910,66 @@ async fn control_task(daemon: Arc<Daemon>, path: PathBuf) {
                         let inner = daemon.inner.lock().await;
                         inner.presenter_monitor.clone()
                     };
+                    let disabled = daemon.disabled_set().await;
+                    let plugins: serde_json::Map<String, Value> = PLUGIN_NAMES
+                        .iter()
+                        .map(|n| (n.to_string(), json!(!disabled.contains(*n))))
+                        .collect();
                     Ok(json!({
                         "ok": true,
                         "presenterMonitor": monitor,
                         "monitors": hypr_monitor_names().await,
+                        "plugins": plugins,
                     }))
+                }
+                "set_plugin" => {
+                    let plugin = req["plugin"].as_str().unwrap_or("");
+                    let enabled = req["enabled"].as_bool().unwrap_or(true);
+                    if !PLUGIN_NAMES.contains(&plugin) {
+                        Err(anyhow::anyhow!("unknown plugin"))
+                    } else {
+                        {
+                            let mut inner = daemon.inner.lock().await;
+                            if enabled {
+                                inner.plugins_disabled.remove(plugin);
+                            } else {
+                                inner.plugins_disabled.insert(plugin.to_string());
+                            }
+                        }
+                        save_plugins_disabled(
+                            &daemon.state,
+                            &daemon.disabled_set().await,
+                        );
+                        log(&format!(
+                            "plugin {} {}",
+                            plugin,
+                            if enabled { "enabled" } else { "disabled" }
+                        ));
+                        if !enabled && plugin == "sftp" {
+                            let ids: Vec<String> = {
+                                let inner = daemon.inner.lock().await;
+                                inner.sftp_mounts.keys().cloned().collect()
+                            };
+                            for id in ids {
+                                daemon.unmount_sftp(&id).await;
+                            }
+                        }
+                        if enabled {
+                            let targets: Vec<String> = {
+                                let inner = daemon.inner.lock().await;
+                                inner
+                                    .devices
+                                    .values()
+                                    .filter(|d| d.paired && d.connected)
+                                    .map(|d| d.id.clone())
+                                    .collect()
+                            };
+                            for id in targets {
+                                daemon.plugin_kick(&id, plugin).await;
+                            }
+                        }
+                        Ok(json!({"ok": true}))
+                    }
                 }
                 "set_presenter_monitor" => {
                     let raw = req["monitor"].as_str().unwrap_or("").trim().to_string();
@@ -2901,6 +2984,15 @@ async fn control_task(daemon: Arc<Daemon>, path: PathBuf) {
                         value.as_deref().unwrap_or("auto")
                     ));
                     Ok(json!({"ok": true, "presenterMonitor": value}))
+                }
+                "send_file" if !daemon.plugin_on("share").await => {
+                    Err(anyhow::anyhow!("file sharing plugin is disabled"))
+                }
+                "mount" if !daemon.plugin_on("sftp").await => {
+                    Err(anyhow::anyhow!("sftp plugin is disabled"))
+                }
+                "ring" if !daemon.plugin_on("findmyphone").await => {
+                    Err(anyhow::anyhow!("find my phone plugin is disabled"))
                 }
                 "send_file" => match req["path"].as_str() {
                     Some(path) => daemon.send_file(device_id, path).await,
@@ -2966,6 +3058,7 @@ async fn run_daemon() -> Result<()> {
             sftp_mounts: HashMap::new(),
             presenter_monitor: load_presenter_monitor(&dir),
             phone_players: HashMap::new(),
+            plugins_disabled: load_plugins_disabled(&dir),
         }),
         clipboard: clipboard_handle,
         last_clipboard: Mutex::new(None),
@@ -3355,6 +3448,93 @@ impl Daemon {
                 ),
             )
             .await;
+        }
+    }
+}
+
+fn load_plugins_disabled(dir: &std::path::Path) -> std::collections::HashSet<String> {
+    let Ok(text) = std::fs::read_to_string(dir.join("settings.json")) else {
+        return std::collections::HashSet::new();
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&text) else {
+        return std::collections::HashSet::new();
+    };
+    v["pluginsDisabled"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn save_plugins_disabled(dir: &std::path::Path, disabled: &std::collections::HashSet<String>) {
+    let v = json!({ "pluginsDisabled": disabled.iter().collect::<Vec<_>>() });
+    let _ = std::fs::write(
+        dir.join("settings.json"),
+        format!("{}\n", serde_json::to_string_pretty(&v).unwrap_or_default()),
+    );
+}
+
+impl Daemon {
+    /// Fire a plugin's connect-time requests at one device, used
+    /// when the plugin is switched back on while devices are live.
+    async fn plugin_kick(self: &Arc<Self>, device_id: &str, plugin: &str) {
+        match plugin {
+            "notification" => {
+                self.send_packet(
+                    device_id,
+                    Packet::new(
+                        "kdeconnect.notification.request",
+                        json!({ "request": true }),
+                    ),
+                )
+                .await;
+            }
+            "battery" => {
+                self.send_packet(
+                    device_id,
+                    Packet::new(
+                        "kdeconnect.battery.request",
+                        json!({ "request": true }),
+                    ),
+                )
+                .await;
+            }
+            "mpris" => {
+                self.mpris_send_all_to(device_id).await;
+                self.send_packet(
+                    device_id,
+                    Packet::new(
+                        "kdeconnect.mpris.request",
+                        json!({ "requestPlayerList": true }),
+                    ),
+                )
+                .await;
+            }
+            "systemvolume" => {
+                self.send_sink_list(device_id).await;
+            }
+            "sftp" => {
+                self.request_sftp(device_id).await;
+            }
+            "clipboard" => {
+                if let Some(handle) = &self.clipboard {
+                    let current = handle.current.lock().unwrap().clone();
+                    if let Some(content) = current {
+                        self.send_packet(
+                            device_id,
+                            Packet::new(
+                                "kdeconnect.clipboard.connect",
+                                json!({ "content": content }),
+                            ),
+                        )
+                        .await;
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }

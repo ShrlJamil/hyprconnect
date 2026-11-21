@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,15 +73,20 @@ impl Packet {
         }
     }
 
-    pub fn identity(identity: &crate::identity::LocalIdentity, tcp_port: u16) -> Self {
+    pub fn identity(
+        identity: &crate::identity::LocalIdentity,
+        tcp_port: u16,
+        disabled_plugins: &HashSet<String>,
+    ) -> Self {
+        let (incoming, outgoing) = capabilities(disabled_plugins);
         Packet::new(
             "kdeconnect.identity",
             json!({
                 "deviceId": identity.device_id,
                 "deviceName": identity.device_name,
                 "deviceType": "desktop",
-                "incomingCapabilities": INCOMING_CAPABILITIES,
-                "outgoingCapabilities": OUTGOING_CAPABILITIES,
+                "incomingCapabilities": incoming,
+                "outgoingCapabilities": outgoing,
                 "protocolVersion": 7,
                 "tcpPort": tcp_port,
             }),
@@ -104,4 +110,58 @@ impl Packet {
         s.push('\n');
         s
     }
+}
+
+/// User-facing plugins, in the order the app's plugin page shows.
+pub const PLUGIN_NAMES: &[&str] = &[
+    "clipboard",
+    "share",
+    "notification",
+    "mpris",
+    "systemvolume",
+    "sftp",
+    "presenter",
+    "battery",
+    "findmyphone",
+];
+
+/// Which plugin a packet type belongs to (None = core traffic that
+/// is never gated: identity, pairing, ping).
+pub fn plugin_for_packet(ptype: &str) -> Option<&'static str> {
+    Some(match ptype {
+        "kdeconnect.clipboard" | "kdeconnect.clipboard.connect" => "clipboard",
+        "kdeconnect.share.request" => "share",
+        "kdeconnect.notification"
+        | "kdeconnect.notification.request"
+        | "kdeconnect.notification.action"
+        | "kdeconnect.notification.reply" => "notification",
+        "kdeconnect.mpris" | "kdeconnect.mpris.request" => "mpris",
+        "kdeconnect.systemvolume" | "kdeconnect.systemvolume.request" => {
+            "systemvolume"
+        }
+        "kdeconnect.sftp" | "kdeconnect.sftp.request" => "sftp",
+        "kdeconnect.presenter" => "presenter",
+        "kdeconnect.battery" | "kdeconnect.battery.request" => "battery",
+        "kdeconnect.findmyphone.request" => "findmyphone",
+        _ => return None,
+    })
+}
+
+/// The capability lists with disabled plugins filtered out.
+pub fn capabilities(
+    disabled_plugins: &HashSet<String>,
+) -> (Vec<&'static str>, Vec<&'static str>) {
+    let filt = |list: &[&'static str]| -> Vec<&'static str> {
+        list.iter()
+            .copied()
+            .filter(|t| {
+                plugin_for_packet(t)
+                    .map_or(true, |pl| !disabled_plugins.contains(pl))
+            })
+            .collect()
+    };
+    (
+        filt(INCOMING_CAPABILITIES),
+        filt(OUTGOING_CAPABILITIES),
+    )
 }

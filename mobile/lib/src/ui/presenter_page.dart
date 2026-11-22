@@ -3,9 +3,10 @@
 //! stock semantics), monitor picker (HyprConnect daemon extension),
 //! and per-slide presenter notes stored on this phone only.
 //!
-//! The page mirrors HyprPresenter's clicker: a dark green Material
-//! theme of its own, a slide-notes card with a counter on top, big
-//! Previous/Next pills, and one green pointer card at the bottom.
+//! The page mirrors HyprPresenter's clicker layout: a slide-notes
+//! card with a counter on top, big Previous/Next pills, and one
+//! big pointer card at the bottom. Colours come from the app's own
+//! theme, so the page does not stand out from the rest of the app.
 //! The pointer follows the stock model: it only streams while the
 //! card is held — gyro deltas and drag deltas both feed it — and
 //! releasing the card ends the session with {"stop": true}.
@@ -26,18 +27,6 @@ import '../protocol/protocol.dart';
 import 'app_state.dart';
 import 'notes_editor_page.dart';
 import 'slide_notes.dart';
-
-/// The presenter page's own theme: HyprPresenter's dark green
-/// Material 3 scheme, whatever the rest of the app uses.
-ThemeData presenterTheme() {
-  return ThemeData(
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: Colors.green,
-      brightness: Brightness.dark,
-    ),
-    useMaterial3: true,
-  );
-}
 
 class PresenterPage extends StatefulWidget {
   final AppState appState;
@@ -165,13 +154,8 @@ class _PresenterPageState extends State<PresenterPage> {
   Future<void> _openNotesEditor() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => Theme(
-          data: presenterTheme(),
-          child: NotesEditorPage(
-            appState: _appState,
-            deviceId: _entry.deviceId,
-          ),
-        ),
+        builder: (_) =>
+            NotesEditorPage(appState: _appState, deviceId: _entry.deviceId),
       ),
     );
     if (mounted) _reloadNotes();
@@ -202,94 +186,91 @@ class _PresenterPageState extends State<PresenterPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Theme(
-      data: presenterTheme(),
-      child: Scaffold(
-        appBar: AppBar(
-          leading: IconButton(
-            icon: Icon(_fullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
-            tooltip: 'Layar penuh',
-            onPressed: _toggleFullscreen,
-          ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.link_off),
-              tooltip: 'Tutup remote',
-              onPressed: _close,
-            ),
-          ],
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: Icon(_fullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
+          tooltip: 'Layar penuh',
+          onPressed: _toggleFullscreen,
         ),
-        body: AnimatedBuilder(
-          animation: _appState,
-          builder: (context, _) {
-            final conn = _appState.connectionFor(_entry.deviceId);
-            if (conn == null) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('Tidak ada koneksi ke perangkat ini.'),
-                ),
-              );
-            }
-            final scheme = Theme.of(context).colorScheme;
-            return SafeArea(
-              child: Column(
-                children: [
-                  _notesBox(scheme),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: SizedBox(
-                            height: 92,
-                            child: OutlinedButton.icon(
-                              onPressed: _goPrevious,
-                              icon: const Icon(Icons.skip_previous, size: 34),
-                              label: const FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  'Sebelumnya',
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                    fontSize: 19,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: SizedBox(
-                            height: 92,
-                            child: FilledButton.icon(
-                              onPressed: _goNext,
-                              icon: const Icon(Icons.skip_next, size: 34),
-                              label: const FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  'Berikutnya',
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                    fontSize: 19,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(child: _pointerCard()),
-                ],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.link_off),
+            tooltip: 'Tutup remote',
+            onPressed: _close,
+          ),
+        ],
+      ),
+      body: AnimatedBuilder(
+        animation: _appState,
+        builder: (context, _) {
+          final conn = _appState.connectionFor(_entry.deviceId);
+          if (conn == null) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Tidak ada koneksi ke perangkat ini.'),
               ),
             );
-          },
-        ),
+          }
+          final scheme = Theme.of(context).colorScheme;
+          return SafeArea(
+            child: Column(
+              children: [
+                _notesBox(scheme),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 92,
+                          child: OutlinedButton.icon(
+                            onPressed: _goPrevious,
+                            icon: const Icon(Icons.skip_previous, size: 34),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Sebelumnya',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: SizedBox(
+                          height: 92,
+                          child: FilledButton.icon(
+                            onPressed: _goNext,
+                            icon: const Icon(Icons.skip_next, size: 34),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'Berikutnya',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 19,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(child: _pointerCard()),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -401,12 +382,14 @@ class _PresenterPageState extends State<PresenterPage> {
   /// area. Holding the area streams the pointer; the card lights
   /// up while held.
   Widget _pointerCard() {
+    final scheme = Theme.of(context).colorScheme;
     final hasMonitors = _appState.hasMonitorListFor(_entry.deviceId);
+    final fg = _holding ? scheme.onPrimary : scheme.onPrimaryContainer;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Container(
         decoration: BoxDecoration(
-          color: _holding ? Colors.green.shade600 : Colors.green.shade900,
+          color: _holding ? scheme.primary : scheme.primaryContainer,
           borderRadius: BorderRadius.circular(28),
         ),
         child: Column(
@@ -416,15 +399,15 @@ class _PresenterPageState extends State<PresenterPage> {
                 padding: const EdgeInsets.fromLTRB(20, 6, 12, 6),
                 child: Row(
                   children: [
-                    const Icon(Icons.monitor, size: 20, color: Colors.white70),
+                    Icon(Icons.monitor, size: 20, color: fg),
                     const SizedBox(width: 10),
                     DropdownButton<String?>(
                       value: _appState.presenterMonitorFor(_entry.deviceId),
                       underline: const SizedBox.shrink(),
-                      dropdownColor: Colors.green.shade800,
-                      iconEnabledColor: Colors.white70,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      dropdownColor: scheme.surfaceContainerHigh,
+                      iconEnabledColor: fg,
+                      style: TextStyle(
+                        color: fg,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
                       ),
@@ -448,7 +431,11 @@ class _PresenterPageState extends State<PresenterPage> {
                   ],
                 ),
               ),
-              const Divider(height: 1, thickness: 1, color: Colors.white24),
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: fg.withValues(alpha: 0.25),
+              ),
             ],
             Expanded(
               child: LayoutBuilder(
@@ -472,12 +459,8 @@ class _PresenterPageState extends State<PresenterPage> {
                     },
                     onPointerUp: (_) => _release(),
                     onPointerCancel: (_) => _release(),
-                    child: const Center(
-                      child: Icon(
-                        Icons.gps_fixed,
-                        size: 88,
-                        color: Colors.white,
-                      ),
+                    child: Center(
+                      child: Icon(Icons.gps_fixed, size: 88, color: fg),
                     ),
                   );
                 },

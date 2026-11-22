@@ -391,3 +391,9 @@ Behaviour changes that come with the reference model:
 Tests: 109 passed + 1 skip (full suite). Note for the emulator rig:
 the adb payload forwards (tcp 1739-1764) break interop_m2 on the
 laptop while they are up; remove them before running the suite.
+
+Correction (same evening, Sahrul): the presenter page keeps
+HyprPresenter's layout but NOT its colours — the private dark green
+theme is gone and the page uses the app's own indigo scheme like
+every other page. The pointer card is primaryContainer (primary
+while held) with matching on-container content colours.

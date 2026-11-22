@@ -93,39 +93,39 @@ void main() {
   testWidgets('no connection is stated honestly', (tester) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
-      MaterialApp(home: PresenterPage(appState: state, entry: _entry())),
+      MaterialApp(
+        home: PresenterPage(appState: state, entry: _entry()),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Tidak ada koneksi ke perangkat ini.'), findsOneWidget);
   });
 
-  testWidgets('page renders pad, gyro switch, slides, notes', (tester) async {
+  testWidgets('page renders notes card, slide pills, pointer card', (
+    tester,
+  ) async {
     await _pumpedState(tester);
-    expect(find.text('Pointer berhenti'), findsOneWidget);
-    expect(find.text('Seret di sini untuk menggerakkan pointer'), findsOneWidget);
-    expect(find.text('Pointer gyro'), findsOneWidget);
+    expect(find.text('Catatan slide'), findsOneWidget);
     expect(find.text('Sebelumnya'), findsOneWidget);
     expect(find.text('Berikutnya'), findsOneWidget);
-    expect(find.text('Layar penuh'), findsOneWidget);
-    expect(find.text('Keluar'), findsOneWidget);
-    expect(find.text('Berhenti'), findsOneWidget);
-    expect(find.text('Catatan presenter'), findsOneWidget);
-    expect(find.text('Simpan catatan'), findsOneWidget);
-    // No monitor list yet: the page says so honestly and still works.
-    expect(
-      find.text(
-        'Desktop ini tidak mengirim daftar monitor, pointer memakai monitor otomatis.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Minta daftar monitor'), findsOneWidget);
+    expect(find.byIcon(Icons.gps_fixed), findsOneWidget);
+    expect(find.byTooltip('Layar penuh'), findsOneWidget);
+    expect(find.byTooltip('Tutup remote'), findsOneWidget);
+    // Notes are empty: create and open-file buttons, no counter.
+    expect(find.byTooltip('Buat catatan'), findsOneWidget);
+    expect(find.byTooltip('Buka file catatan'), findsOneWidget);
+    // No monitor list yet: no dropdown in the card header, and the
+    // pointer still works (the daemon picks the monitor).
+    expect(find.text('Otomatis'), findsNothing);
   });
 
   testWidgets('opening the page asks for the monitor list', (tester) async {
     final (conn, _) = await _pumpedState(tester);
     expect(
       conn.sent.any(
-        (p) => p.type == 'kdeconnect.presenter' && p.body['requestMonitorList'] == true,
+        (p) =>
+            p.type == 'kdeconnect.presenter' &&
+            p.body['requestMonitorList'] == true,
       ),
       isTrue,
     );
@@ -146,13 +146,9 @@ void main() {
     expect(conn.sent, hasLength(2));
     expect(conn.sent.last.body, {'specialKey': 8});
 
-    await tester.tap(find.text('Layar penuh'));
+    await tester.tap(find.byTooltip('Layar penuh'));
     await tester.pump();
     expect(conn.sent.last.body, {'specialKey': 25});
-
-    await tester.tap(find.text('Keluar'));
-    await tester.pump();
-    expect(conn.sent.last.body, {'specialKey': 14});
   });
 
   testWidgets('drag on the pad sends presenter deltas', (tester) async {
@@ -165,7 +161,9 @@ void main() {
     );
     await tester.pump();
     final moves = conn.sent
-        .where((p) => p.type == 'kdeconnect.presenter' && p.body.containsKey('dx'))
+        .where(
+          (p) => p.type == 'kdeconnect.presenter' && p.body.containsKey('dx'),
+        )
         .toList();
     expect(moves, isNotEmpty);
     // Drag right and down: both deltas positive, fractions of the pad.
@@ -173,49 +171,54 @@ void main() {
     expect(moves.first.body['dx'] as double, lessThan(1));
     expect(moves.first.body['dy'] as double, greaterThan(0));
     expect(moves.first.body['dy'] as double, lessThan(1));
-    expect(find.text('Pointer aktif di monitor otomatis'), findsOneWidget);
   });
 
-  testWidgets('gyro events move the pointer with the stock mapping',
-      (tester) async {
+  testWidgets('gyro events move the pointer with the stock mapping', (
+    tester,
+  ) async {
     final gyro = StreamController<GyroscopeEvent>();
     addTearDown(gyro.close);
     final (conn, _) = await _pumpedState(tester, gyroStream: gyro.stream);
     conn.sent.clear();
 
+    // The pointer only streams while the card is held.
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('presenterPad'))),
+    );
     await tester.runAsync(() async {
       gyro.add(GyroscopeEvent(0.5, 0.0, -1.0, DateTime.now()));
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
     await tester.pump();
+    await gesture.up();
     final moves = conn.sent
-        .where((p) => p.type == 'kdeconnect.presenter' && p.body.containsKey('dx'))
+        .where(
+          (p) => p.type == 'kdeconnect.presenter' && p.body.containsKey('dx'),
+        )
         .toList();
     expect(moves, hasLength(1));
     expect(moves.single.body['dx'], closeTo(0.036, 1e-9));
     expect(moves.single.body['dy'], closeTo(-0.018, 1e-9));
   });
 
-  testWidgets('Berhenti sends stop:true', (tester) async {
+  testWidgets('releasing the pad sends stop:true', (tester) async {
     final (conn, _) = await _pumpedState(tester);
-    // Start the pointer first so there is a session to stop.
     await tester.drag(
       find.byKey(const ValueKey('presenterPad')),
       const Offset(50, 0),
     );
     await tester.pump();
-    conn.sent.clear();
-
-    await tester.tap(find.text('Berhenti'));
-    await tester.pump();
-    expect(conn.sent, hasLength(1));
-    expect(conn.sent.single.type, 'kdeconnect.presenter');
-    expect(conn.sent.single.body, {'stop': true});
-    expect(find.text('Pointer berhenti'), findsOneWidget);
+    final stops = conn.sent
+        .where(
+          (p) => p.type == 'kdeconnect.presenter' && p.body['stop'] == true,
+        )
+        .toList();
+    expect(stops, hasLength(1));
   });
 
-  testWidgets('monitor list reply shows the picker and pins a monitor',
-      (tester) async {
+  testWidgets('monitor list reply shows the picker and pins a monitor', (
+    tester,
+  ) async {
     final (conn, state) = await _pumpedState(tester);
     await tester.runAsync(
       () => state.handleIncomingPacket(
@@ -227,7 +230,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Monitor presenter'), findsOneWidget);
     expect(find.text('Otomatis'), findsOneWidget);
 
     await tester.tap(find.text('Otomatis'));
@@ -240,17 +242,29 @@ void main() {
     expect(sets, hasLength(1));
   });
 
-  testWidgets('notes are saved on this phone', (tester) async {
+  testWidgets('notes are edited per slide and saved on this phone', (
+    tester,
+  ) async {
     final (_, state) = await _pumpedState(tester);
+    await tester.tap(find.byTooltip('Buat catatan'));
+    await tester.pumpAndSettle();
     await tester.enterText(
-      find.byType(TextField),
+      find.byType(TextField).first,
       'Buka dengan pertanyaan, jangan dengan definisi.',
     );
-    await tester.tap(find.text('Simpan catatan'));
     await tester.pump();
+    // Every keystroke is saved: no save button anywhere.
     expect(
       state.presenterNotesFor(_deviceId),
-      'Buka dengan pertanyaan, jangan dengan definisi.',
+      contains('Buka dengan pertanyaan, jangan dengan definisi.'),
     );
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    // Back on the clicker the note shows with its slide counter.
+    expect(
+      find.text('Buka dengan pertanyaan, jangan dengan definisi.'),
+      findsOneWidget,
+    );
+    expect(find.text('1 / 1'), findsOneWidget);
   });
 }

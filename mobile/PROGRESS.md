@@ -363,3 +363,31 @@ Connect: pill melayang membulat, teks di tengah, 2 detik).
   bukan bug app).
 - Tes: 103 lolos + 1 skip (clipboard_page_test ikut dihapus bersama
   halamannya; tes tls unpair sempat flaky sekali, lulus saat diulang).
+
+## Addendum 2026-11-22 evening: presenter page restyled after HyprPresenter
+
+At Sahrul's request the mobile Presentation remote page now mirrors
+his HyprPresenter clicker (source read on the laptop,
+~/Documents/DEV/hyprpresenter/mobile): its own dark green Material 3
+theme (ColorScheme.fromSeed green, dark), a slide-notes card with a
+slide counter and re-sync chevrons, big Previous/Next pills
+(outlined / filled), and one green pointer card (green.shade900,
+green.shade600 while held) whose header strip carries the monitor
+dropdown. App bar holds only the fullscreen toggle and a link-off
+close button. Labels stay Indonesian.
+
+Behaviour changes that come with the reference model:
+- The pointer only streams while the card is held (gyro and drag
+  both feed it); releasing sends {"stop": true}. The gyro switch,
+  the separate Esc and Stop buttons, and the status texts are gone;
+  the fullscreen button still sends specialKey 25.
+- Notes are per-slide now: parsed/serialized in the same Markdown
+  interchange format HyprPresenter uses (## N headings, ---
+  separators), so notes files work in both apps. The stored
+  per-device document keeps the old single-note text as slide 1.
+  The editor is notebook-style (one cell per slide, add tile,
+  saves on every keystroke) and can open a .md/.txt notes file.
+
+Tests: 109 passed + 1 skip (full suite). Note for the emulator rig:
+the adb payload forwards (tcp 1739-1764) break interop_m2 on the
+laptop while they are up; remove them before running the suite.

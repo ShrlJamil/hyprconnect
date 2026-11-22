@@ -575,9 +575,19 @@ class AppState extends ChangeNotifier {
       _logLine('Pair ${conn.remoteName}: $state');
       notifyListeners();
     });
-    conn.packets.listen((packet) {
-      unawaited(handleIncomingPacket(conn, packet));
-    });
+    conn.packets.listen(
+      (packet) {
+        unawaited(handleIncomingPacket(conn, packet));
+      },
+      onDone: () {
+        // The channel ended: forget the connection so offline
+        // devices disappear from the drawer and the shell again.
+        if (_connections[id] == conn) {
+          _connections.remove(id);
+          notifyListeners();
+        }
+      },
+    );
     notifyListeners();
   }
 

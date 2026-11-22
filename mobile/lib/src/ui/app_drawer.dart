@@ -39,7 +39,8 @@ class AppDrawer extends StatelessWidget {
         .where(_isPaired)
         .where(
           (entry) =>
-              entry.online || appState.connectionFor(entry.deviceId) != null,
+              entry.online ||
+              (appState.connectionFor(entry.deviceId)?.isConnected ?? false),
         )
         .toList();
     final colorScheme = Theme.of(context).colorScheme;

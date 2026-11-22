@@ -754,5 +754,12 @@ class DeviceConnection {
     _lineSubscription = null;
     await _socket?.close();
     _socket = null;
+    // End the packet stream so AppState can drop this connection
+    // from its map; a closed connection must stop counting as
+    // present in the drawer and the shell (his report, 2026-11-22:
+    // a dead device kept showing in the menu).
+    if (!_packetController.isClosed) {
+      await _packetController.close();
+    }
   }
 }

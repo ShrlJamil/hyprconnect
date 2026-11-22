@@ -457,3 +457,20 @@ Atas screenshot referensi Sahrul dari aplikasi KDE Connect Android
   sejak ronde multimedia; probe TLS manual membuktikan aplikasi
   menyajikan sertifikat yang benar lewat forward yang sama, jadi
   halaman baru belum terfoto live. Vonis fisik menunggu HP asli.
+
+## Addendum 2026-11-22 (malam): perangkat mati harus hilang dari menu
+
+Keluhan Sahrul: perangkat luring muncul lagi di drawer emulator.
+Akar masalahnya bug aplikasi sungguhan: koneksi yang sudah mati
+tidak pernah dibuang dari peta koneksi AppState, jadi saringan
+drawer dan shell (yang memeriksa keberadaan koneksi) lolos selamanya
+setelah koneksi pertama. Perbaikan: DeviceConnection.close() kini
+menutup stream paketnya, AppState membuang koneksi dari peta saat
+stream itu berakhir, dan saringan drawer/shell menuntut koneksi yang
+hidup (isConnected), bukan sekadar entri peta. Terverifikasi live di
+emulator: build baru menampilkan arch-acer hanya saat kanalnya
+benar-benar tersambung (daemon mengonfirmasi connected: true).
+Catatan jujur: kanal daemon ke aplikasi sore ini tidak stabil
+(terhubung lalu mati dalam hitungan detik, terlihat di log aplikasi
+dan membuat interop_m3/m5 gagal di lingkungan ini); di kode pristine
+tes yang sama hanya ter-skip karena tidak ada player bertitel.

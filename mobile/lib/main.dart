@@ -68,7 +68,8 @@ class _HomePageState extends State<HomePage> {
             .where(
               (entry) =>
                   entry.online ||
-                  _appState.connectionFor(entry.deviceId) != null,
+                  (_appState.connectionFor(entry.deviceId)?.isConnected ??
+                      false),
             )
             .toList();
         DeviceListEntry? selected;

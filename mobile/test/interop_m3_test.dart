@@ -54,11 +54,12 @@ Map<String, dynamic>? _findDevice(Map<String, dynamic> snapshot, String id) {
 }
 
 void main() {
-  test('M3: multimedia control and run commands against the daemon',
-      () async {
+  test('M3: multimedia control and run commands against the daemon', () async {
     final ss = await Process.run('ss', ['-ltn']);
     if (!(ss.stdout as String).contains(':$_daemonPort ')) {
-      markTestSkipped('daemon hyprconnect tidak jalan di $_daemonHost:$_daemonPort');
+      markTestSkipped(
+        'daemon hyprconnect tidak jalan di $_daemonHost:$_daemonPort',
+      );
       return;
     }
 
@@ -183,8 +184,9 @@ void main() {
         (p) => p.type == 'kdeconnect.runcommand',
       );
       await channel.requestRunCommandList();
-      final cmdListPacket =
-          await cmdListSeen.timeout(const Duration(seconds: 20));
+      final cmdListPacket = await cmdListSeen.timeout(
+        const Duration(seconds: 20),
+      );
       final commands = parseCommandList(cmdListPacket);
       final echo = commands.where((c) => c.key == _echoKey).toList();
       if (echo.isEmpty) {

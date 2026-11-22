@@ -26,7 +26,7 @@ use tokio::sync::{mpsc, Mutex};
 const UDP_PORT: u16 = 1716;
 const TCP_FIRST: u16 = 1714;
 const TCP_LAST: u16 = 1764;
-const PAIR_TIMEOUT: Duration = Duration::from_secs(30);
+const PAIR_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone)]
 struct DeviceInfo {
@@ -41,6 +41,13 @@ struct DeviceInfo {
     pending_in: bool,
     pending_out: bool,
     pair_deadline: Option<Instant>,
+    /// Failed outgoing connect attempts since the last live channel;
+    /// drives the sweeper's reconnect backoff.
+    connect_attempts: u32,
+    last_attempt: Option<Instant>,
+    /// Generation of the channel that currently owns this device; a
+    /// replaced channel's teardown must not clear newer state.
+    channel_gen: u64,
     peer_spki: Vec<u8>,
     peer_cert: Vec<u8>,
     battery_level: Option<i64>,
@@ -61,6 +68,9 @@ impl DeviceInfo {
             pending_in: false,
             pending_out: false,
             pair_deadline: None,
+            connect_attempts: 0,
+            last_attempt: None,
+            channel_gen: 0,
             peer_spki: Vec::new(),
             peer_cert: Vec::new(),
             battery_level: None,
@@ -102,6 +112,7 @@ struct Inner {
     devices: HashMap<String, DeviceInfo>,
     channels: HashMap<String, mpsc::Sender<Packet>>,
     connecting: HashSet<String>,
+    next_channel_gen: u64,
     trust: TrustStore,
     subscribers: Vec<mpsc::Sender<String>>,
     /// Phone notification id -> desktop notification id.
@@ -2399,21 +2410,35 @@ impl Daemon {
     ) {
         let device_id = info.id.clone();
         let (tx, mut rx) = mpsc::channel::<Packet>(32);
-        {
+        let channel_gen = {
             let mut inner = self.inner.lock().await;
+            inner.next_channel_gen += 1;
             if inner
                 .devices
                 .get(&device_id)
                 .map(|d| d.connected)
                 .unwrap_or(false)
             {
-                log(&format!("duplicate connection to {}, dropping new one", device_id));
-                return;
+                // The newest channel wins: the old one may be a zombie
+                // whose peer already vanished (Wi-Fi switch, NAT
+                // timeout). Its teardown is generation-guarded below
+                // and cannot clear this channel's state.
+                log(&format!(
+                    "new connection to {} replaces the existing channel",
+                    device_id
+                ));
             }
+            inner.next_channel_gen
+        };
+        {
+            let mut inner = self.inner.lock().await;
             let paired = inner.trust.is_trusted(&device_id);
             let mut dev = info;
             dev.connected = true;
             dev.paired = paired;
+            dev.channel_gen = channel_gen;
+            dev.connect_attempts = 0;
+            dev.last_attempt = None;
             // Preserve pairing state set before the channel came up
             // (a pair request is what triggered this connection).
             if let Some(old) = inner.devices.get(&device_id) {
@@ -2549,19 +2574,34 @@ impl Daemon {
             }
             writer.abort();
             let mut inner = daemon.inner.lock().await;
-            if let Some(dev) = inner.devices.get_mut(&read_id) {
-                dev.connected = false;
-                dev.pending_in = false;
-                dev.pending_out = false;
-                dev.pair_deadline = None;
+            let is_current = inner
+                .devices
+                .get(&read_id)
+                .map(|d| d.channel_gen == channel_gen)
+                .unwrap_or(false);
+            if is_current {
+                if let Some(dev) = inner.devices.get_mut(&read_id) {
+                    dev.connected = false;
+                    // Pairing state survives a channel flap on purpose:
+                    // the pair deadline (sweeper) owns its expiry, and
+                    // a fresh channel re-sends a pending request when
+                    // it registers.
+                }
+                inner.channels.remove(&read_id);
             }
-            inner.channels.remove(&read_id);
             drop(inner);
-            log(&format!("disconnected from {}", read_id));
-            daemon.unmount_sftp(&read_id).await;
-            daemon
-                .emit(json!({"event": "disconnected", "deviceId": read_id}))
-                .await;
+            if is_current {
+                log(&format!("disconnected from {}", read_id));
+                daemon.unmount_sftp(&read_id).await;
+                daemon
+                    .emit(json!({"event": "disconnected", "deviceId": read_id}))
+                    .await;
+            } else {
+                log(&format!(
+                    "stale channel to {} closed (already replaced)",
+                    read_id
+                ));
+            }
         });
     }
 }
@@ -2644,16 +2684,58 @@ fn attach_cert(info: &mut DeviceInfo, peer_cert_der: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// TCP keepalive so a channel whose peer vanished silently (Wi-Fi
+/// switch, NAT timeout) eventually errors out instead of looking
+/// connected forever.
+fn set_keepalive(stream: &TcpStream) {
+    let sock = socket2::SockRef::from(stream);
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(30))
+        .with_interval(Duration::from_secs(10));
+    let _ = sock.set_tcp_keepalive(&keepalive);
+}
+
+/// Exponential backoff for sweeper reconnects: a trusted device is
+/// retried for as long as its last address is known, just less and
+/// less often (5s, 10s, 20s, 40s, then every 60s).
+fn reconnect_due(dev: &DeviceInfo) -> bool {
+    match dev.last_attempt {
+        None => true,
+        Some(t) => {
+            let shift = dev.connect_attempts.saturating_sub(1).min(4);
+            let wait = Duration::from_secs((5u64 << shift).min(60));
+            t.elapsed() >= wait
+        }
+    }
+}
+
 async fn connect_to(daemon: Arc<Daemon>, device_id: String, ip: IpAddr, port: u16) {
+    {
+        let mut inner = daemon.inner.lock().await;
+        if let Some(dev) = inner.devices.get_mut(&device_id) {
+            dev.last_attempt = Some(Instant::now());
+        }
+    }
     let result = async {
-        let mut tcp = TcpStream::connect((ip, port))
-            .await
-            .context("TCP connect")?;
+        // Bounded attempts: one dial to a stale address must not park
+        // the device's connecting slot until the OS gives up.
+        let mut tcp = tokio::time::timeout(
+            Duration::from_secs(5),
+            TcpStream::connect((ip, port)),
+        )
+        .await
+        .context("TCP connect timed out")?
+        .context("TCP connect")?;
+        set_keepalive(&tcp);
         // We opened the TCP connection: send our identity in plaintext
         // first, then act as the TLS server.
         send_plaintext_identity(&daemon, &mut tcp).await?;
-        let (stream, peer_cert) =
-            tls::handshake_as_server(tcp, &daemon.identity).await?;
+        let (stream, peer_cert) = tokio::time::timeout(
+            Duration::from_secs(10),
+            tls::handshake_as_server(tcp, &daemon.identity),
+        )
+        .await
+        .context("TLS handshake timed out")??;
         let mut info = {
             let inner = daemon.inner.lock().await;
             inner
@@ -2679,10 +2761,19 @@ async fn connect_to(daemon: Arc<Daemon>, device_id: String, ip: IpAddr, port: u1
         Ok::<(), anyhow::Error>(())
     }
     .await;
+    let failed = result.is_err();
     if let Err(e) = result {
         log(&format!("connect to {} failed: {:#}", device_id, e));
     }
-    daemon.inner.lock().await.connecting.remove(&device_id);
+    {
+        let mut inner = daemon.inner.lock().await;
+        if failed {
+            if let Some(dev) = inner.devices.get_mut(&device_id) {
+                dev.connect_attempts = dev.connect_attempts.saturating_add(1);
+            }
+        }
+        inner.connecting.remove(&device_id);
+    }
 }
 
 async fn maybe_connect(daemon: &Arc<Daemon>, device_id: &str) {
@@ -2723,9 +2814,14 @@ async fn handle_incoming(daemon: Arc<Daemon>, tcp: TcpStream, remote: SocketAddr
         // then act as the TLS client (SNI names that device, as the
         // protocol expects).
         let mut tcp = tcp;
+        set_keepalive(&tcp);
         let mut info = read_plaintext_identity(&mut tcp, remote.ip()).await?;
-        let (stream, peer_cert) =
-            tls::handshake_as_client(tcp, &daemon.identity, &info.id.clone()).await?;
+        let (stream, peer_cert) = tokio::time::timeout(
+            Duration::from_secs(10),
+            tls::handshake_as_client(tcp, &daemon.identity, &info.id.clone()),
+        )
+        .await
+        .context("TLS handshake timed out")??;
         attach_cert(&mut info, &peer_cert)?;
         {
             let inner = daemon.inner.lock().await;
@@ -2840,10 +2936,9 @@ async fn sweeper_task(daemon: Arc<Daemon>) {
                 if trusted_ids.contains(&dev.id)
                     && !dev.connected
                     && !connecting_snapshot.contains(&dev.id)
-                    && dev
-                        .last_seen
-                        .map(|t| t.elapsed() < Duration::from_secs(60))
-                        .unwrap_or(false)
+                    && dev.last_ip.is_some()
+                    && dev.last_tcp_port.is_some()
+                    && reconnect_due(dev)
                 {
                     reconnect.push(dev.id.clone());
                 }
@@ -3230,6 +3325,7 @@ async fn run_daemon() -> Result<()> {
             devices: HashMap::new(),
             channels: HashMap::new(),
             connecting: HashSet::new(),
+            next_channel_gen: 0,
             trust,
             subscribers: Vec::new(),
             notif_ids: HashMap::new(),

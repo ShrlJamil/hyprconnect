@@ -9,12 +9,14 @@
 //! instead. Nothing here sends a packet the daemon does not already
 //! understand: ping and pair:false (unpair/reject) are core traffic.
 
+import 'dart:async';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../protocol/protocol.dart';
 import '../settings/plugin_settings.dart';
 import 'app_state.dart';
-import 'clipboard_page.dart';
 import 'encryption_info_page.dart';
 import 'feature_placeholder_page.dart';
 import 'multimedia_page.dart';
@@ -22,7 +24,6 @@ import 'runcommand_page.dart';
 import 'remote_input_page.dart';
 import 'plugin_settings_page.dart';
 import 'presenter_page.dart';
-import 'share_page.dart';
 
 IconData _tileIcon(String pluginId) {
   return switch (pluginId) {
@@ -64,9 +65,18 @@ class _DevicePageState extends State<DevicePage> {
   AppState get _appState => widget.appState;
   DeviceListEntry get _entry => widget.entry;
 
+  /// Toast-style notice, KDE Connect style: a floating rounded pill
+  /// near the bottom of the screen instead of a full-width bar.
   void _snack(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, textAlign: TextAlign.center),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(48, 0, 48, 24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _connect() async {
@@ -115,6 +125,83 @@ class _DevicePageState extends State<DevicePage> {
     }
   }
 
+  /// Kirim file, KDE Connect style: the tile opens the system file
+  /// picker directly and the picked file is sent right away, with a
+  /// progress dialog while it uploads and a snackbar when it lands.
+  Future<void> _pickAndSendFile() async {
+    final picked = await FilePicker.pickFile();
+    if (picked == null || !mounted) return;
+    final knownSize = await picked.length();
+    final buffered = knownSize != null ? null : await picked.readAsBytes();
+    final size = buffered?.length ?? knownSize ?? 0;
+    final Stream<List<int>> bytes = buffered != null
+        ? Stream<List<int>>.value(buffered)
+        : picked.readAsByteStream();
+    if (!mounted) return;
+    final progress = ValueNotifier<double?>(0);
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Mengirim file'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(picked.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 12),
+              ValueListenableBuilder<double?>(
+                valueListenable: progress,
+                builder: (context, value, child) =>
+                    LinearProgressIndicator(value: value),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    try {
+      await _appState.sendFile(
+        _entry.deviceId,
+        filename: picked.name,
+        size: size,
+        bytes: bytes,
+        onProgress: (sent) {
+          progress.value = size == 0 ? 1 : sent / size;
+        },
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      _snack('Terkirim: ${picked.name}');
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      _snack('Gagal mengirim file: $e');
+    }
+  }
+
+  /// Kirim papan klip, instant: send whatever text the phone
+  /// clipboard currently holds and report with a snackbar. No page.
+  Future<void> _sendClipboardNow() async {
+    try {
+      final text = await _appState.readClipboardText();
+      if (!mounted) return;
+      if (text == null || text.isEmpty) {
+        _snack('Papan klip kosong atau bukan teks.');
+        return;
+      }
+      final sent = await _appState.sendClipboard(_entry.deviceId, text);
+      if (!mounted) return;
+      _snack(
+        sent ? 'Papan klip terkirim' : 'Tidak ada koneksi ke perangkat ini.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _snack('Gagal mengirim papan klip: $e');
+    }
+  }
+
   void _onTileTap(String pluginId, String title) {
     final conn = _appState.connectionFor(_entry.deviceId);
     final paired = conn?.isPaired ?? false;
@@ -127,11 +214,7 @@ class _DevicePageState extends State<DevicePage> {
       return;
     }
     if (pluginId == 'share') {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => SharePage(appState: _appState, entry: _entry),
-        ),
-      );
+      unawaited(_pickAndSendFile());
       return;
     }
     if (pluginId == 'mpris') {
@@ -162,12 +245,7 @@ class _DevicePageState extends State<DevicePage> {
       return;
     }
     if (pluginId == 'clipboard') {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) =>
-              ClipboardPage(appState: _appState, entry: _entry),
-        ),
-      );
+      unawaited(_sendClipboardNow());
       return;
     }
     if (pluginId == 'presenter') {

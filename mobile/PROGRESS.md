@@ -345,3 +345,21 @@ kartu info arch-acer di halaman perangkat dihapus menyisakan 6 ubin.
   "Plugin nonaktif"; tes interop M5 sempat gagal karena presenter.json
   daemon berisi DP-1 sisa pemakaian, sudah direset ke auto).
 - Tampil dan terverifikasi di emulator AVD lewat rig redir/forward.
+
+## Addendum 2026-11-22 sore — Kirim file & papan klip instan
+Perintah Sahrul: ubin Kirim file langsung membuka pemilih file
+sistem dan file terpilih langsung terkirim; Kirim papan klip instan
+tanpa halaman, cukup pemberitahuan sukses di bawah (gaya toast KDE
+Connect: pill melayang membulat, teks di tengah, 2 detik).
+- SharePage dan ClipboardPage dihapus. Ubin share memanggil
+  FilePicker.pickFile() lalu AppState.sendFile dengan dialog
+  progres "Mengirim file"; ubin clipboard membaca clipboard HP
+  (kini di dalam try/catch — bacaan yang gagal tidak lagi diam) dan
+  mengirimkannya, sukses dilaporkan "Papan klip terkirim".
+- Bukti hidup di emulator: DocumentsUI terbuka dari ubin (activity
+  terverifikasi dumpsys), share.request sampai ke daemon; clipboard
+  diterima daemon ("clipboard received (21 chars), applying").
+  Payload emulator butuh forward port 1739-1764 (artefak NAT rig,
+  bukan bug app).
+- Tes: 103 lolos + 1 skip (clipboard_page_test ikut dihapus bersama
+  halamannya; tes tls unpair sempat flaky sekali, lulus saat diulang).

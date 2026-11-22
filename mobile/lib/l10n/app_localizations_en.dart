@@ -527,4 +527,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get batteryAllow => 'Allow';
+
+  @override
+  String get autostart => 'Autostart (Xiaomi / HyperOS)';
+
+  @override
+  String get autostartBody =>
+      'On Xiaomi phones the system also has its own Autostart switch. Turn it on for this app, or the system can stop it in the background even with unrestricted battery.';
+
+  @override
+  String get autostartOpen => 'Open';
 }

@@ -522,4 +522,14 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get batteryAllow => 'Izinkan';
+
+  @override
+  String get autostart => 'Autostart (Xiaomi / HyperOS)';
+
+  @override
+  String get autostartBody =>
+      'Di HP Xiaomi sistem juga punya saklar Autostart sendiri. Nyalakan untuk aplikasi ini, atau sistem bisa menghentikannya di latar walau baterai sudah tanpa batas.';
+
+  @override
+  String get autostartOpen => 'Buka';
 }

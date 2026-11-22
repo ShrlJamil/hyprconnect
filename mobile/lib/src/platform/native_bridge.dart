@@ -12,11 +12,38 @@ class NativeBridge {
 
   /// Start the foreground service that keeps this process (and with
   /// it discovery and the TCP listener) alive in the background.
-  static Future<void> startKeepAlive() async {
+  /// Returns the native side's own report of what happened, or null
+  /// when the bridge is unavailable.
+  static Future<String?> startKeepAlive() async {
     try {
-      await _channel.invokeMethod<void>('startKeepAlive');
+      return await _channel.invokeMethod<String>('startKeepAlive');
     } catch (_) {
       // No native side: nothing to start.
+      return null;
+    }
+  }
+
+  /// Whether the keep-alive service is running right now, and what
+  /// it last recorded about itself (started, crashed, destroyed).
+  /// This is the evidence that separates "the service never
+  /// started" from "the vendor power manager killed it later".
+  static Future<String?> keepAliveStatus() async {
+    try {
+      return await _channel.invokeMethod<String>('keepAliveStatus');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Open the vendor autostart page (Xiaomi's HyperOS / MIUI keeps
+  /// its own switch for background survival) or, failing that, this
+  /// app's system details page. Returns false when neither opened.
+  static Future<bool> openAutostartSettings() async {
+    try {
+      return await _channel.invokeMethod<bool>('openAutostartSettings') ??
+          false;
+    } catch (_) {
+      return false;
     }
   }
 

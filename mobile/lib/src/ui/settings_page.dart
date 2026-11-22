@@ -37,6 +37,8 @@ class SettingsPage extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               const _BatteryCard(),
+              const SizedBox(height: 8),
+              const _AutostartCard(),
               if (appState.receiveDirPath != null) ...[
                 const SizedBox(height: 8),
                 Card(
@@ -116,9 +118,7 @@ class _BatteryCardState extends State<_BatteryCard> {
                 : TextButton(
                     onPressed: () async {
                       await NativeBridge.openBatteryOptimizationSettings();
-                      await Future<void>.delayed(
-                        const Duration(seconds: 1),
-                      );
+                      await Future<void>.delayed(const Duration(seconds: 1));
                       if (mounted) {
                         setState(() {
                           _unrestricted =
@@ -130,6 +130,30 @@ class _BatteryCardState extends State<_BatteryCard> {
                   ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Xiaomi's HyperOS / MIUI keeps a second, vendor-only gate for
+/// background survival: the Autostart switch. Without it the system
+/// can stop this app in the background even when the system battery
+/// exemption above is granted, which is exactly how a missing
+/// persistent notification presents. This card opens that page.
+class _AutostartCard extends StatelessWidget {
+  const _AutostartCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.rocket_launch, size: 36),
+        title: Text(context.l10n.autostart),
+        subtitle: Text(context.l10n.autostartBody),
+        trailing: TextButton(
+          onPressed: () => NativeBridge.openAutostartSettings(),
+          child: Text(context.l10n.autostartOpen),
+        ),
       ),
     );
   }

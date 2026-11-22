@@ -288,7 +288,10 @@ class AppState extends ChangeNotifier {
         notifyListeners();
       });
       await discovery.start();
-      unawaited(NativeBridge.startKeepAlive());
+      unawaited(() async {
+        final report = await NativeBridge.startKeepAlive();
+        if (report != null) _logLine('Keep-alive service: $report');
+      }());
       _identity = identity;
       _trust = trust;
       _pluginSettings = pluginSettings;
@@ -620,6 +623,16 @@ class AppState extends ChangeNotifier {
   /// network while we were backgrounded, this is the cheap moment
   /// to heal the connection.
   void onResumed() {
+    unawaited(() async {
+      final status = await NativeBridge.keepAliveStatus();
+      if (status != null) {
+        _logLine('Keep-alive status: $status');
+        if (status.startsWith('running=false')) {
+          final report = await NativeBridge.startKeepAlive();
+          if (report != null) _logLine('Keep-alive restart: $report');
+        }
+      }
+    }());
     _discovery?.broadcastIdentity();
     for (final device in _found.values) {
       _maybeAutoConnect(device);
@@ -651,9 +664,8 @@ class AppState extends ChangeNotifier {
       trusted: true,
     );
     unawaited(
-      connectTo(entry).whenComplete(
-        () => _autoConnectInFlight.remove(device.deviceId),
-      ),
+      connectTo(entry)
+          .whenComplete(() => _autoConnectInFlight.remove(device.deviceId)),
     );
   }
 

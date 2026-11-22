@@ -1051,6 +1051,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Allow'**
   String get batteryAllow;
+
+  /// No description provided for @autostart.
+  ///
+  /// In en, this message translates to:
+  /// **'Autostart (Xiaomi / HyperOS)'**
+  String get autostart;
+
+  /// No description provided for @autostartBody.
+  ///
+  /// In en, this message translates to:
+  /// **'On Xiaomi phones the system also has its own Autostart switch. Turn it on for this app, or the system can stop it in the background even with unrestricted battery.'**
+  String get autostartBody;
+
+  /// No description provided for @autostartOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get autostartOpen;
 }
 
 class _AppLocalizationsDelegate

@@ -12,7 +12,6 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -20,6 +19,9 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Start the keep-alive service natively as well, so its
+        // survival does not depend on the Dart side booting first.
+        KeepAliveService.start(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
         }
@@ -31,11 +33,16 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "startKeepAlive" -> {
-                        ContextCompat.startForegroundService(
-                            this,
-                            Intent(this, KeepAliveService::class.java),
+                        result.success(KeepAliveService.start(this))
+                    }
+                    "keepAliveStatus" -> {
+                        result.success(
+                            "running=${KeepAliveService.isRunning(this)}, " +
+                                "last: ${KeepAliveService.status(this)}",
                         )
-                        result.success(null)
+                    }
+                    "openAutostartSettings" -> {
+                        result.success(openAutostartSettings())
                     }
                     "showPairingNotification" -> {
                         val name = call.argument<String>("deviceName") ?: ""
@@ -90,6 +97,35 @@ class MainActivity : FlutterActivity() {
             .setAutoCancel(true)
             .build()
         manager.notify(pairingNotificationId(deviceId), notification)
+    }
+
+    /// Xiaomi's HyperOS / MIUI gates background survival behind
+    /// its own Autostart switch, separate from the system battery
+    /// exemption. Open that page when it exists; otherwise fall
+    /// back to this app's system details page.
+    private fun openAutostartSettings(): Boolean {
+        val miui = Intent().apply {
+            component = android.content.ComponentName(
+                "com.miui.securitycenter",
+                "com.miui.permcenter.autostart.AutoStartManagementActivity",
+            )
+        }
+        return try {
+            startActivity(miui)
+            true
+        } catch (e: Exception) {
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:$packageName"),
+                    ),
+                )
+                true
+            } catch (e2: Exception) {
+                false
+            }
+        }
     }
 
     private fun openBatteryOptimizationSettings() {

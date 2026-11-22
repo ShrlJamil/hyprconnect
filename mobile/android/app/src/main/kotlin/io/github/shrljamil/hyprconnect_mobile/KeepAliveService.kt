@@ -1,5 +1,6 @@
 package io.github.shrljamil.hyprconnect_mobile
 
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -11,6 +12,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 /// Keeps this process at foreground-service importance so Android
 /// does not kill the discovery broadcaster and the TCP listener
@@ -19,6 +21,13 @@ import androidx.core.app.NotificationCompat
 /// a multicast lock (so UDP discovery broadcasts are received with
 /// the screen off) and a Wi-Fi lock, and shows the mandatory
 /// persistent notification.
+///
+/// Every lifecycle outcome is recorded to SharedPreferences so the
+/// Dart side can show it in the in-app log: on OEM builds (MIUI /
+/// HyperOS above all) a foreground service can be started and still
+/// be killed by the vendor's own power manager, and the difference
+/// between "never started", "crashed" and "killed later" decides
+/// what the user has to change.
 class KeepAliveService : Service() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -42,7 +51,13 @@ class KeepAliveService : Service() {
         } catch (e: Exception) {
             // Continue without the locks.
         }
-        startForegroundWithNotification()
+        try {
+            startForegroundWithNotification()
+            record(this, "foreground since ${now()}")
+        } catch (e: Exception) {
+            record(this, "startForeground failed: ${e.javaClass.simpleName}: ${e.message}")
+            throw e
+        }
     }
 
     private fun startForegroundWithNotification() {
@@ -85,7 +100,17 @@ class KeepAliveService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // The user swiped the app away: restart the service so the
+        // connection survives without the task. Whether the OEM
+        // honours this is exactly what the status record shows.
+        record(this, "task removed at ${now()}, restarting")
+        start(this)
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
+        record(this, "destroyed at ${now()}")
         multicastLock?.release()
         wifiLock?.release()
         super.onDestroy()
@@ -96,5 +121,46 @@ class KeepAliveService : Service() {
     companion object {
         const val CHANNEL_ID = "connection"
         const val NOTIFICATION_ID = 1
+        private const val PREFS = "keep_alive"
+        private const val KEY_STATUS = "status"
+
+        private fun now(): String =
+            java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                .format(java.util.Date())
+
+        fun record(context: Context, status: String) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_STATUS, status)
+                .apply()
+        }
+
+        fun status(context: Context): String =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_STATUS, "never started") ?: "never started"
+
+        fun isRunning(context: Context): Boolean {
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            @Suppress("DEPRECATION")
+            return manager.getRunningServices(Int.MAX_VALUE).any {
+                it.service.className == KeepAliveService::class.java.name
+            }
+        }
+
+        /// Start (or nudge) the service and report what happened, so
+        /// the caller can log it instead of guessing.
+        fun start(context: Context): String {
+            return try {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, KeepAliveService::class.java),
+                )
+                "start requested at ${now()}, running=${isRunning(context)}"
+            } catch (e: Exception) {
+                val message = "start failed: ${e.javaClass.simpleName}: ${e.message}"
+                record(context, message)
+                message
+            }
+        }
     }
 }

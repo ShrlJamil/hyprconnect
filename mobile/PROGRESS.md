@@ -551,3 +551,24 @@ this app were lost when interop test daemons raced the same trust
 file during the build sessions. After installing this build, pair
 once from the desktop app (the phone re-confirms automatically)
 or from the phone; it persists from then on.
+
+### Malam 22 Nov (lanjutan): service mati di HyperOS, diagnostik + Autostart
+
+Di HP asli: aplikasi berfungsi penuh pukul 20:06 (slider volume
+Peranti mengalir ke daemon), lalu pukul 20:09:06 kanal putus dan
+semua reconnect daemon ditolak (listener hilang) — proses aplikasi
+MATI ±3 menit sesudah ditinggal, tanpa notifikasi persisten. Jadi
+foreground service memang tidak bertahan di HyperOS, bukan soal
+visibilitas notifikasi; merged manifest rilis terbukti benar.
+Perbaikan: (1) service kini mencatat nasibnya sendiri ke
+SharedPreferences (foreground sejak/destroyed/gagal) dan status itu
+masuk log aplikasi lewat bridge; (2) service juga dimulai natif
+dari MainActivity.onCreate, bukan hanya dari Dart; (3) onTaskRemoved
+memulai ulang service; (4) onResumed memeriksa status dan menghidupkan
+ulang bila mati; (5) kartu Pengaturan baru "Autostart (Xiaomi /
+HyperOS)" membuka saklar Autostart vendor, gerbang kedua HyperOS di
+luar exemption baterai sistem. Terverifikasi di emulator: catatan
+service "foreground since 20:14:14" + NotificationRecord id=1
+ONGOING|FOREGROUND_SERVICE. APK rilis arm64 baru (20.314.941 byte)
+terkirim ke HP 20:16:51. Vonis fisik di HP asli menunggu: pasang,
+nyalakan Autostart, tinggalkan aplikasi, cek notifikasi + log.

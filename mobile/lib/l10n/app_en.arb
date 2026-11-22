@@ -231,5 +231,8 @@
   "batteryOptimization": "Battery optimization",
   "batteryRestricted": "The system may stop this app in the background. Allow unrestricted battery use so the connection to your devices stays alive.",
   "batteryUnrestricted": "This app can use battery without restrictions, so it stays connected in the background.",
-  "batteryAllow": "Allow"
+  "batteryAllow": "Allow",
+  "autostart": "Autostart (Xiaomi / HyperOS)",
+  "autostartBody": "On Xiaomi phones the system also has its own Autostart switch. Turn it on for this app, or the system can stop it in the background even with unrestricted battery.",
+  "autostartOpen": "Open"
 }

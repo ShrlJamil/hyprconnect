@@ -54,4 +54,41 @@ void main() {
     expect(packet.body['incomingCapabilities'], contains('kdeconnect.ping'));
     expect(packet.body['outgoingCapabilities'], contains('kdeconnect.ping'));
   });
+
+  test('identity filters out disabled plugins capabilities', () {
+    final packet = Packet.identity(
+      deviceId: 'a' * 32,
+      deviceName: 'Test Phone',
+      tcpPort: 1714,
+      disabledPlugins: {'share', 'clipboard'},
+    );
+    final incoming =
+        (packet.body['incomingCapabilities'] as List).cast<String>();
+    final outgoing =
+        (packet.body['outgoingCapabilities'] as List).cast<String>();
+    expect(incoming, isNot(contains('kdeconnect.share.request')));
+    expect(outgoing, isNot(contains('kdeconnect.share.request')));
+    expect(incoming, isNot(contains('kdeconnect.clipboard')));
+    expect(incoming, isNot(contains('kdeconnect.clipboard.connect')));
+    // Core traffic and runcommand are never gated (mirrors the daemon).
+    expect(incoming, contains('kdeconnect.ping'));
+    expect(incoming, contains('kdeconnect.mpris.request'));
+    expect(incoming, contains('kdeconnect.runcommand'));
+    expect(outgoing, contains('kdeconnect.runcommand.request'));
+    expect(outgoing, contains('kdeconnect.runcommand.output'));
+  });
+
+  test('pluginForPacketType mirrors the daemon mapping', () {
+    expect(pluginForPacketType('kdeconnect.ping'), isNull);
+    expect(pluginForPacketType('kdeconnect.pair'), isNull);
+    expect(pluginForPacketType('kdeconnect.runcommand'), isNull);
+    expect(
+      pluginForPacketType('kdeconnect.mousepad.request'),
+      'remoteinput',
+    );
+    expect(pluginForPacketType('kdeconnect.presenter'), 'presenter');
+    expect(pluginForPacketType('kdeconnect.findmyphone.request'),
+        'findmyphone');
+    expect(pluginForPacketType('kdeconnect.systemvolume'), 'systemvolume');
+  });
 }

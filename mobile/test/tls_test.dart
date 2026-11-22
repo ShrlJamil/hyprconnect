@@ -105,4 +105,75 @@ void main() {
       await dirB.delete(recursive: true);
     }
   }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('unpair notifies the peer and both sides forget the trust',
+      () async {
+    final dirA = await _tempDir('hyprconnect-unpair-a-');
+    final dirB = await _tempDir('hyprconnect-unpair-b-');
+    try {
+      final idA = await LocalIdentity.loadOrCreate(
+        dirA,
+        deviceName: 'Phone A',
+      );
+      final idB = await LocalIdentity.loadOrCreate(
+        dirB,
+        deviceName: 'Phone B',
+      );
+      final trustA = await TrustStore.load(dirA);
+      final trustB = await TrustStore.load(dirB);
+
+      final listener = TcpListener();
+      final listenPort = await listener.start();
+      final connB = DeviceConnection(
+        identity: idB,
+        trust: trustB,
+        tcpPort: listenPort,
+      );
+      final acceptDone = listener.connections.first.then((raw) async {
+        await connB.acceptIncoming(raw);
+      });
+      final connA = DeviceConnection(
+        identity: idA,
+        trust: trustA,
+        tcpPort: listenPort,
+      );
+      await connA.connectOutgoing(
+        address: InternetAddress.loopbackIPv4,
+        tcpPort: listenPort,
+        deviceId: idB.deviceId,
+        name: idB.deviceName,
+        deviceType: 'phone',
+        peerCertDer: idB.certDer,
+      );
+      await acceptDone.timeout(const Duration(seconds: 10));
+
+      await connA.requestPair();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await connB.requestPair();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(connA.isPaired, isTrue);
+      expect(connB.isPaired, isTrue);
+
+      final bUnpaired = Completer<void>();
+      final sub = connB.pairStates.listen((state) {
+        if (state == PairState.unpaired && !bUnpaired.isCompleted) {
+          bUnpaired.complete();
+        }
+      });
+      await connA.unpair();
+      await bUnpaired.future.timeout(const Duration(seconds: 5));
+      expect(connA.isPaired, isFalse);
+      expect(connB.isPaired, isFalse);
+      expect(trustA.isTrusted(idB.deviceId), isFalse);
+      expect(trustB.isTrusted(idA.deviceId), isFalse);
+      expect(connA.isConnected, isFalse);
+
+      await sub.cancel();
+      await connB.close();
+      await listener.stop();
+    } finally {
+      await dirA.delete(recursive: true);
+      await dirB.delete(recursive: true);
+    }
+  }, timeout: const Timeout(Duration(seconds: 60)));
 }

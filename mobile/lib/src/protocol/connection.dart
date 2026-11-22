@@ -46,6 +46,12 @@ class DeviceConnection {
   Uint8List? peerSpki;
   PairState _pairState = PairState.unknown;
 
+  /// Plugins the user switched off for this peer. They are filtered
+  /// out of the identity this channel advertises (see Packet.identity).
+  /// Set before the handshake; changing it later only takes effect on
+  /// the next connection.
+  Set<String> disabledPlugins = const {};
+
   DeviceConnection({
     required this.identity,
     required this.trust,
@@ -189,6 +195,7 @@ class DeviceConnection {
       deviceId: identity.deviceId,
       deviceName: identity.deviceName,
       tcpPort: tcpPort,
+      disabledPlugins: disabledPlugins,
     );
   }
 
@@ -305,6 +312,26 @@ class DeviceConnection {
     } else if (_pairState != PairState.paired) {
       _setPairState(PairState.pendingOut);
     }
+  }
+
+  /// End pairing with this peer: send pair:false (the daemon
+  /// treats it as unpair), forget the trusted certificate, and close
+  /// the channel. The peer stays discoverable; pairing again starts
+  /// from scratch.
+  Future<void> unpair() async {
+    await sendPacket(Packet.pair(false));
+    final id = remoteDeviceId;
+    if (id != null) await trust.remove(id);
+    _setPairState(PairState.unpaired);
+    await close();
+  }
+
+  /// Decline an incoming pair request: send pair:false without
+  /// touching the trust store (an existing trust entry, if any, is
+  /// kept, unlike unpair which removes it).
+  Future<void> rejectPair() async {
+    await sendPacket(Packet.pair(false));
+    _setPairState(PairState.unpaired);
   }
 
   Future<void> sendPing([String? message]) async {

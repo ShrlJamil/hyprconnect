@@ -64,11 +64,31 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
       saat tes interop: TcpListener memakai broadcast stream yang
       membuang koneksi yang datang sebelum ada yang mendengarkan —
       kini single-subscription (buffered).
-- [ ] M1 KDE Connect-style shell: device list, device page with the
+- [x] M1 KDE Connect-style shell: device list, device page with the
       two-column tile grid (Kirim file, Kirim papan klip, Presentation
       remote, Kendali multimedia, Masukan jarak jauh, Jalankan Perintah),
       three-dot menu (Kirim ping, Pengesetan plugin, Info Enkripsi,
       Leraikan), plugin settings page, encryption info page.
+      SELESAI 2026-11-22 13:35. Bukti: `flutter test` 24/24 lolos
+      (M0 11 + plugin settings 5 + packet filter 2 + unpair 1 +
+      widget halaman perangkat 5); `flutter analyze` bersih;
+      `flutter build apk --debug` berhasil
+      (mobile/build/app/outputs/flutter-apk/app-debug.apk, 176 MB).
+      Halaman utama kini menampilkan perangkat yang pernah dipair
+      walau sedang luring; halaman perangkat memakai AppState bersama
+      sehingga status pairing/koneksi berubah di semua halaman
+      sekaligus. Pengaturan plugin per perangkat tersimpan di
+      plugin_settings.json (11 plugin, urutan dan id sama seperti
+      PLUGIN_NAMES daemon) dan ikut menyaring capability di identity
+      paket per koneksi, persis seperti filter disabled_plugins
+      daemon; broadcast discovery tetap mengiklankan daftar penuh.
+      Ubin yang fiturnya baru hadir di M2-M5 membuka halaman
+      placeholder jujur yang menyebut fasenya; ubin yang pluginnya
+      dimatikan menjelaskan cara mengaktifkannya lagi. Unpair
+      (pair:false) terbukti dua arah di tes TLS: kedua sisi lupa trust.
+      Daemon TIDAK diubah sama sekali di fase ini; tes interop M0
+      tetap lolos melawan daemon yang sedang jalan (systemd active,
+      port 1714 listen).
 - [ ] M2 Send file (share.request with payload upload) and Send clipboard
       (clipboard push; receive sets the phone clipboard), within Android
       limits.
@@ -95,6 +115,22 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
   mobile/test/ (packet_test, identity_test, tls_test, interop_test).
   Izin INTERNET/ACCESS_NETWORK_STATE/ACCESS_WIFI_STATE ditambahkan ke
   AndroidManifest. test/widget_test.dart scaffold dihapus.
-- Next step: M1 — shell ala KDE Connect (daftar perangkat, halaman
-  perangkat grid dua kolom 6 ubin, menu titik tiga, halaman pengaturan
-  plugin, halaman info enkripsi).
+- 2026-11-22 13:35 M1 selesai (lihat centang di atas). File baru:
+  mobile/lib/src/settings/plugin_settings.dart (katalog 11 plugin +
+  simpan per perangkat), mobile/lib/src/ui/app_state.dart (state
+  bersama + DeviceListEntry + ConnectOutcome),
+  mobile/lib/src/ui/device_page.dart (grid 6 ubin + menu titik tiga
+  + spanduk pairing dengan kunci verifikasi + dialog pairing
+  pertama + konfirmasi leraikan),
+  mobile/lib/src/ui/plugin_settings_page.dart,
+  mobile/lib/src/ui/encryption_info_page.dart (sidik jari SHA-256
+  kedua sertifikat + kunci verifikasi),
+  mobile/lib/src/ui/feature_placeholder_page.dart.
+  Perubahan protokol aditif saja: Packet.identity menerima
+  disabledPlugins (default kosong, paket tak berubah),
+  DeviceConnection.unpair()/rejectPair() (pair:false, sudah dikenal
+  daemon). Tes baru: test/plugin_settings_test.dart,
+  test/device_page_test.dart; packet_test dan tls_test diperluas.
+- Next step: M2 — Kirim file (share.request + upload payload) dan
+  Kirim papan klip (clipboard push; terima mengatur papan klip HP),
+  dalam batas Android.

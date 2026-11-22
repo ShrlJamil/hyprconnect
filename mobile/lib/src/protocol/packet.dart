@@ -42,6 +42,31 @@ class Capabilities {
   ];
 }
 
+/// Which user-facing plugin a packet type belongs to, mirroring
+/// the daemon's plugin_for_packet (src/packet.rs). Null means core
+/// traffic that is never gated: identity, pairing, ping, and the
+/// runcommand packets (the daemon maps those to no plugin either).
+String? pluginForPacketType(String type) {
+  return switch (type) {
+    'kdeconnect.clipboard' || 'kdeconnect.clipboard.connect' => 'clipboard',
+    'kdeconnect.share.request' => 'share',
+    'kdeconnect.notification' ||
+        'kdeconnect.notification.request' ||
+        'kdeconnect.notification.action' ||
+        'kdeconnect.notification.reply' =>
+      'notification',
+    'kdeconnect.mpris' || 'kdeconnect.mpris.request' => 'mpris',
+    'kdeconnect.systemvolume' || 'kdeconnect.systemvolume.request' =>
+      'systemvolume',
+    'kdeconnect.sftp' || 'kdeconnect.sftp.request' => 'sftp',
+    'kdeconnect.presenter' => 'presenter',
+    'kdeconnect.mousepad.request' => 'remoteinput',
+    'kdeconnect.battery' || 'kdeconnect.battery.request' => 'battery',
+    'kdeconnect.findmyphone.request' => 'findmyphone',
+    _ => null,
+  };
+}
+
 class Packet {
   final int id;
   final String type;
@@ -96,13 +121,24 @@ class Packet {
     required String deviceId,
     required String deviceName,
     required int tcpPort,
+    Set<String> disabledPlugins = const {},
   }) {
+    // A disabled plugin drops its packet types from the advertised
+    // capabilities, exactly like the daemon's capabilities() filter.
+    // With no disabled plugins the lists are unchanged.
+    bool kept(String type) {
+      final plugin = pluginForPacketType(type);
+      return plugin == null || !disabledPlugins.contains(plugin);
+    }
+
     return Packet.now('kdeconnect.identity', {
       'deviceId': deviceId,
       'deviceName': deviceName,
       'deviceType': 'phone',
-      'incomingCapabilities': Capabilities.incoming,
-      'outgoingCapabilities': Capabilities.outgoing,
+      'incomingCapabilities':
+          Capabilities.incoming.where(kept).toList(),
+      'outgoingCapabilities':
+          Capabilities.outgoing.where(kept).toList(),
       'protocolVersion': 7,
       'tcpPort': tcpPort,
     });

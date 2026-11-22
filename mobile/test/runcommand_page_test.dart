@@ -117,8 +117,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Cek Disk'), findsOneWidget);
     expect(find.text('df -h'), findsOneWidget);
-    expect(find.textContaining('Menjalankan: df -h'), findsOneWidget);
+    expect(find.text('\$ df -h'), findsOneWidget);
     expect(find.text('/dev/sda 100G'), findsOneWidget);
-    expect(find.text('Selesai (kode keluar 0)'), findsOneWidget);
+    // The console follows the stock app: a finished run adds no
+    // line of its own.
+    expect(find.textContaining('Selesai'), findsNothing);
   }, timeout: const Timeout(Duration(seconds: 30)));
 }

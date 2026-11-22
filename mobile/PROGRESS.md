@@ -474,3 +474,16 @@ Catatan jujur: kanal daemon ke aplikasi sore ini tidak stabil
 (terhubung lalu mati dalam hitungan detik, terlihat di log aplikasi
 dan membuat interop_m3/m5 gagal di lingkungan ini); di kode pristine
 tes yang sama hanya ter-skip karena tidak ada player bertitel.
+
+## Addendum 2026-11-22 (malam): Jalankan Perintah ala aplikasi bawaan
+
+Mengikuti screenshot referensi Sahrul dari HP-nya: halaman Jalankan
+Perintah kini berupa kartu konsol di atas (setiap run digaungkan
+sebagai baris hijau "$ <command>", output di bawahnya, event selesai
+tidak menambah baris, sama seperti aslinya), daftar perintah di
+bawah dengan nama besar tebal + perintah redup, menu titik tiga
+berisi Muat ulang daftar dan Hentikan perintah (saat berjalan), dan
+FAB pensil di kanan bawah yang mengirim setup request (daemon
+membuka editor perintah di aplikasi desktop). Terverifikasi live di
+emulator: mengetuk Terminal menjalankan kitty di desktop dan konsol
+menampilkan "$ kitty" hijau dengan penanda berjalan.

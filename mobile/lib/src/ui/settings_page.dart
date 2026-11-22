@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/l10n.dart';
+import '../platform/native_bridge.dart';
 import 'app_state.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -34,6 +35,8 @@ class SettingsPage extends StatelessWidget {
                         ),
                 ),
               ),
+              const SizedBox(height: 8),
+              const _BatteryCard(),
               if (appState.receiveDirPath != null) ...[
                 const SizedBox(height: 8),
                 Card(
@@ -67,6 +70,64 @@ class SettingsPage extends StatelessWidget {
                 ),
               ),
             ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Battery-optimization status: while the app is restricted, the
+/// system can kill it in the background and the connection dies
+/// with it. The button opens the system's own exemption dialog.
+class _BatteryCard extends StatefulWidget {
+  const _BatteryCard();
+
+  @override
+  State<_BatteryCard> createState() => _BatteryCardState();
+}
+
+class _BatteryCardState extends State<_BatteryCard> {
+  late Future<bool> _unrestricted;
+
+  @override
+  void initState() {
+    super.initState();
+    _unrestricted = NativeBridge.isIgnoringBatteryOptimizations();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: FutureBuilder<bool>(
+        future: _unrestricted,
+        builder: (context, snapshot) {
+          final unrestricted = snapshot.data ?? false;
+          return ListTile(
+            leading: const Icon(Icons.battery_saver, size: 36),
+            title: Text(context.l10n.batteryOptimization),
+            subtitle: Text(
+              unrestricted
+                  ? context.l10n.batteryUnrestricted
+                  : context.l10n.batteryRestricted,
+            ),
+            trailing: unrestricted
+                ? null
+                : TextButton(
+                    onPressed: () async {
+                      await NativeBridge.openBatteryOptimizationSettings();
+                      await Future<void>.delayed(
+                        const Duration(seconds: 1),
+                      );
+                      if (mounted) {
+                        setState(() {
+                          _unrestricted =
+                              NativeBridge.isIgnoringBatteryOptimizations();
+                        });
+                      }
+                    },
+                    child: Text(context.l10n.batteryAllow),
+                  ),
           );
         },
       ),

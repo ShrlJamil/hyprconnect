@@ -508,4 +508,18 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get waitingForPlayer => 'Menunggu status player dari desktop...';
+
+  @override
+  String get batteryOptimization => 'Optimasi baterai';
+
+  @override
+  String get batteryRestricted =>
+      'Sistem dapat menghentikan aplikasi ini di latar. Izinkan pemakaian baterai tanpa batas agar koneksi ke perangkatmu tetap hidup.';
+
+  @override
+  String get batteryUnrestricted =>
+      'Aplikasi ini dapat memakai baterai tanpa batas, jadi tetap terhubung di latar.';
+
+  @override
+  String get batteryAllow => 'Izinkan';
 }

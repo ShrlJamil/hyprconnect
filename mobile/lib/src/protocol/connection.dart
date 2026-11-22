@@ -280,7 +280,13 @@ class DeviceConnection {
     if (pair) {
       if (_pairState == PairState.pendingOut) {
         _completePairing();
-      } else if (_pairState != PairState.paired) {
+      } else if (_pairState == PairState.paired) {
+        // Already paired on this side: re-confirm, so a peer that
+        // lost its trust store (or was reset) can complete pairing
+        // again instead of being ignored forever. KDE Connect does
+        // the same.
+        unawaited(sendPacket(Packet.pair(true)));
+      } else {
         _setPairState(PairState.pendingIn);
       }
     } else {

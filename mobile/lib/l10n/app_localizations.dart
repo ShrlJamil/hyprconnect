@@ -1027,6 +1027,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Waiting for player status from the desktop...'**
   String get waitingForPlayer;
+
+  /// No description provided for @batteryOptimization.
+  ///
+  /// In en, this message translates to:
+  /// **'Battery optimization'**
+  String get batteryOptimization;
+
+  /// No description provided for @batteryRestricted.
+  ///
+  /// In en, this message translates to:
+  /// **'The system may stop this app in the background. Allow unrestricted battery use so the connection to your devices stays alive.'**
+  String get batteryRestricted;
+
+  /// No description provided for @batteryUnrestricted.
+  ///
+  /// In en, this message translates to:
+  /// **'This app can use battery without restrictions, so it stays connected in the background.'**
+  String get batteryUnrestricted;
+
+  /// No description provided for @batteryAllow.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get batteryAllow;
 }
 
 class _AppLocalizationsDelegate

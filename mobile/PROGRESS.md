@@ -491,3 +491,63 @@ menampilkan "$ kitty" hijau dengan penanda berjalan.
 ## Addendum 2026-11-22 (malam): English first + lokalisasi OS
 
 Aplikasi kini English-first dengan lokalisasi Flutter standar: semua string UI hidup di lib/l10n/app_en.arb (sumber) dan app_id.arb (terjemahan Indonesia), MaterialApp memakai delegate bawaan sehingga OS yang memilih bahasa (locale sistem, atau bahasa per-aplikasi Android 13+ lewat locales_config.xml + android:localeConfig + resourceConfigurations en/id). Katalog plugin dan label enum remote input kini membawa id saja; teks tampilannya diselesaikan dari ARB (plugin_text.dart dan resolver di halaman pengaturan remote input). Log dan status di AppState ditulis dalam bahasa Inggris (bahasa sumber, tidak dilokalkan). Tes widget berjalan di locale id dan tetap menegaskan teks Indonesia; pageBack() diganti ketuk BackButton karena pageBack mencari tooltip Inggris. Terverifikasi di emulator: bahasa sistem Inggris menampilkan UI Inggris, locale per-aplikasi id menampilkan UI Indonesia dari build yang sama.
+
+## Addendum, 2026-11-22 evening: reconnect and pairing fixes
+
+Diagnosis (code-verified on both sides): the phone app had no
+foreground service, so Android/MIUI killed the process and with it
+discovery and the listener; the app never auto-connected; the
+daemon's sweeper gave up on a trusted device 60 seconds after last
+seeing it; connect_to had no timeout; a stale channel blocked a
+fresh one ("duplicate connection, dropping"); pairing state was
+wiped on every channel flap and the pair timeout was 30 s; the
+phone showed pairing requests only as a card on the device page.
+A second, subtler find: when the app was already paired but the
+daemon had lost its trust entry, a desktop-initiated pair request
+was silently ignored by the app, so re-pairing from the desktop
+could never complete.
+
+Daemon (src/main.rs, additive for KDE Connect):
+- connect_to bounded: 5 s TCP connect, 10 s TLS handshake; TCP
+  keepalive (30 s idle, 10 s interval) on both directions.
+- register_channel: the newest channel replaces a stale one;
+  teardown is generation-guarded so a replaced channel cannot
+  clear the new channel's state or unmount its SFTP.
+- Sweeper: trusted devices are retried for as long as their last
+  address is known, with exponential backoff (5 s to 60 s cap).
+- PAIR_TIMEOUT 30 s -> 120 s; pending pairing survives channel
+  teardown and is re-sent when a fresh channel registers.
+- Live check: the stock KDE Connect app on the POCO reconnected
+  to the new daemon build on its own and stayed connected.
+
+Mobile:
+- KeepAliveService: a connectedDevice foreground service (the
+  pattern KDE Connect uses) holding a multicast lock and a Wi-Fi
+  lock, started from AppState.initialize via a MethodChannel
+  bridge (lib/src/platform/native_bridge.dart). WAKE_LOCK is
+  required for the Wi-Fi lock; lock failures can no longer crash
+  the service. Verified on the emulator: startForegroundCount=1,
+  process state FGS while backgrounded, persistent notification
+  "HyprConnect is running" in the shade.
+- Auto-connect: trusted devices heard on discovery are connected
+  automatically (10 s per-device cooldown); onResumed re-announces
+  and retries. Verified live twice ("Connected (outgoing) to
+  arch-acer" in the app log after a forged discovery packet).
+- Pairing: an incoming request posts a system notification
+  ("arch-acer wants to pair with this device", verified in the
+  emulator shade) and is cancelled when the state moves on.
+- Already-paired re-confirm: a pair request received while paired
+  is answered with pair=true, so a desktop that lost its trust
+  store completes re-pairing. Verified: desktop-initiated pair
+  landed the emulator's entry in the daemon's trusted.json.
+- Settings gains a Battery optimization card (status + Allow
+  button opening the system exemption dialog; en + id strings).
+- Tests: 108 non-interop tests pass; analyze shows only the two
+  pre-existing der.dart infos.
+
+Note: the daemon's trusted.json on the laptop currently trusts
+only the KDE Connect app among real devices; earlier pairings of
+this app were lost when interop test daemons raced the same trust
+file during the build sessions. After installing this build, pair
+once from the desktop app (the phone re-confirms automatically)
+or from the phone; it persists from then on.

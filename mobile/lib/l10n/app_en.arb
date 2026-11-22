@@ -227,5 +227,9 @@
   },
   "waitingForDesktop": "Waiting to be accepted on the desktop",
   "waitingForDesktopBody": "The pairing request has been sent. Match this key with the one shown on the desktop, then tap Accept there.",
-  "waitingForPlayer": "Waiting for player status from the desktop..."
+  "waitingForPlayer": "Waiting for player status from the desktop...",
+  "batteryOptimization": "Battery optimization",
+  "batteryRestricted": "The system may stop this app in the background. Allow unrestricted battery use so the connection to your devices stays alive.",
+  "batteryUnrestricted": "This app can use battery without restrictions, so it stays connected in the background.",
+  "batteryAllow": "Allow"
 }

@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../platform/native_bridge.dart';
 import '../protocol/protocol.dart';
 import '../settings/plugin_settings.dart';
 import '../settings/remote_input_prefs.dart';
@@ -62,6 +63,12 @@ class AppState extends ChangeNotifier {
   TcpListener? _listener;
   Discovery? _discovery;
   final Map<String, DiscoveredDevice> _found = {};
+
+  /// Auto-connect bookkeeping: trusted devices heard on discovery
+  /// are connected without the user tapping anything, with a short
+  /// cooldown so a flapping peer is not dialled in a tight loop.
+  final Set<String> _autoConnectInFlight = {};
+  final Map<String, DateTime> _autoConnectLast = {};
   final Map<String, DeviceConnection> _connections = {};
   final List<String> _log = [];
   Directory? _receiveDir;
@@ -277,9 +284,11 @@ class AppState extends ChangeNotifier {
       unawaited(listener.connections.forEach(_onIncoming));
       discovery.devices.listen((device) {
         _found[device.deviceId] = device;
+        _maybeAutoConnect(device);
         notifyListeners();
       });
       await discovery.start();
+      unawaited(NativeBridge.startKeepAlive());
       _identity = identity;
       _trust = trust;
       _pluginSettings = pluginSettings;
@@ -573,6 +582,16 @@ class AppState extends ChangeNotifier {
     _connections[id] = conn;
     conn.pairStates.listen((state) {
       _logLine('Pair ${conn.remoteName}: $state');
+      if (state == PairState.pendingIn) {
+        unawaited(
+          NativeBridge.showPairingNotification(
+            deviceName: conn.remoteName ?? '',
+            deviceId: id,
+          ),
+        );
+      } else {
+        unawaited(NativeBridge.cancelPairingNotification(id));
+      }
       notifyListeners();
     });
     conn.packets.listen(
@@ -594,6 +613,48 @@ class AppState extends ChangeNotifier {
   void _logLine(String line) {
     _log.add(line);
     if (_log.length > 100) _log.removeRange(0, _log.length - 100);
+  }
+
+  /// Re-announce ourselves and retry auto-connects when the app
+  /// comes back to the foreground: whatever the system did to the
+  /// network while we were backgrounded, this is the cheap moment
+  /// to heal the connection.
+  void onResumed() {
+    _discovery?.broadcastIdentity();
+    for (final device in _found.values) {
+      _maybeAutoConnect(device);
+    }
+  }
+
+  /// Connect to a trusted device that discovery just heard, unless
+  /// it is already connected or an attempt is fresh. First pairing
+  /// stays a deliberate user action and is never auto-started.
+  void _maybeAutoConnect(DiscoveredDevice device) {
+    final trust = _trust;
+    if (trust == null || !trust.isTrusted(device.deviceId)) return;
+    if (_connections[device.deviceId]?.isConnected ?? false) return;
+    if (!_autoConnectInFlight.add(device.deviceId)) return;
+    final last = _autoConnectLast[device.deviceId];
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(seconds: 10)) {
+      _autoConnectInFlight.remove(device.deviceId);
+      return;
+    }
+    _autoConnectLast[device.deviceId] = DateTime.now();
+    final entry = DeviceListEntry(
+      deviceId: device.deviceId,
+      name: device.name,
+      deviceType: device.deviceType,
+      address: device.address,
+      tcpPort: device.tcpPort,
+      online: true,
+      trusted: true,
+    );
+    unawaited(
+      connectTo(entry).whenComplete(
+        () => _autoConnectInFlight.remove(device.deviceId),
+      ),
+    );
   }
 
   /// Open a connection to a discovered device. With a known

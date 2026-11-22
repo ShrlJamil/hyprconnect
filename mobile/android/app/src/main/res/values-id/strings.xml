@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_connection">Layanan koneksi</string>
+    <string name="service_notif_title">HyprConnect berjalan</string>
+    <string name="service_notif_text">Menjaga koneksi ke perangkatmu tetap hidup</string>
+    <string name="notif_channel_pairing">Permintaan pairing</string>
+    <string name="pairing_notif_title">Permintaan pairing</string>
+    <string name="pairing_notif_text">%1$s ingin pairing dengan perangkat ini</string>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notif_channel_connection">Connection service</string>
+    <string name="service_notif_title">HyprConnect is running</string>
+    <string name="service_notif_text">Keeping the connection to your devices alive</string>
+    <string name="notif_channel_pairing">Pairing requests</string>
+    <string name="pairing_notif_title">Pairing request</string>
+    <string name="pairing_notif_text">%1$s wants to pair with this device</string>
+</resources>

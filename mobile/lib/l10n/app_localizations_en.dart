@@ -513,4 +513,18 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get waitingForPlayer =>
       'Waiting for player status from the desktop...';
+
+  @override
+  String get batteryOptimization => 'Battery optimization';
+
+  @override
+  String get batteryRestricted =>
+      'The system may stop this app in the background. Allow unrestricted battery use so the connection to your devices stays alive.';
+
+  @override
+  String get batteryUnrestricted =>
+      'This app can use battery without restrictions, so it stays connected in the background.';
+
+  @override
+  String get batteryAllow => 'Allow';
 }

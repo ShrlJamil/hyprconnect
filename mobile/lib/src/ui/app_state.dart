@@ -70,6 +70,18 @@ class AppState extends ChangeNotifier {
   String? _lastReceivedClipboard;
   String? _lastReceivedFrom;
   DateTime? _lastReceivedAt;
+  Directory? _artDir;
+  // M3: per-device multimedia state (deviceId -> ...).
+  final Map<String, List<String>> _playerLists = {};
+  final Map<String, Map<String, MprisPlayerState>> _playerStates = {};
+  final Map<String, String> _selectedPlayers = {};
+  final Map<String, String> _albumArtPaths = {};
+  final Set<String> _artRequested = {};
+  // M3: per-device run-command state (deviceId -> ...).
+  final Map<String, List<RunCommand>> _commandLists = {};
+  final Map<String, bool> _canAddCommands = {};
+  final Map<String, List<RunCommandOutput>> _commandEvents = {};
+  final Map<String, int?> _runningCommandIds = {};
   String? _lastClipboardSent;
   String? _lastClipboardApplied;
   String _status = 'Memulai...';
@@ -100,6 +112,44 @@ class AppState extends ChangeNotifier {
 
   /// Where files from peers are saved, if known yet.
   String? get receiveDirPath => _receiveDir?.path;
+
+  /// M3: desktop player names known for a device (empty when none
+  /// reported yet).
+  List<String> playerListFor(String deviceId) {
+    return List.unmodifiable(_playerLists[deviceId] ?? const []);
+  }
+
+  /// M3: last known now-playing state of one player, if any.
+  MprisPlayerState? playerStateFor(String deviceId, String player) {
+    return _playerStates[deviceId]?[player];
+  }
+
+  /// M3: the player the multimedia page currently controls, if any.
+  String? selectedPlayerFor(String deviceId) => _selectedPlayers[deviceId];
+
+  /// M3: local path of the downloaded album art for a player, if any.
+  String? albumArtPathFor(String deviceId, String player) {
+    return _albumArtPaths['$deviceId|$player'];
+  }
+
+  /// M3: predefined commands the desktop offers, if the list arrived.
+  List<RunCommand> commandsFor(String deviceId) {
+    return List.unmodifiable(_commandLists[deviceId] ?? const []);
+  }
+
+  /// M3: whether the desktop lets this phone open the command editor.
+  bool canAddCommandFor(String deviceId) {
+    return _canAddCommands[deviceId] ?? false;
+  }
+
+  /// M3: streamed output events of commands run on a device, oldest
+  /// first (capped, so a chatty command cannot grow memory forever).
+  List<RunCommandOutput> commandEventsFor(String deviceId) {
+    return List.unmodifiable(_commandEvents[deviceId] ?? const []);
+  }
+
+  /// M3: id of the command currently running on a device, if any.
+  int? runningCommandIdFor(String deviceId) => _runningCommandIds[deviceId];
 
   DeviceConnection? connectionFor(String deviceId) {
     return _connections[deviceId];
@@ -143,6 +193,13 @@ class AppState extends ChangeNotifier {
     return list;
   }
 
+  /// Test-only hook: register a connection built by a test so pages
+  /// can render their connected UI without a live socket.
+  @visibleForTesting
+  void registerTestConnection(DeviceConnection conn) {
+    _registerConnection(conn);
+  }
+
   /// Test-only constructor: state with the given plugin settings and
   /// nothing started. Production code uses AppState() + initialize().
   AppState.test({required PluginSettings settings})
@@ -162,6 +219,8 @@ class AppState extends ChangeNotifier {
       final trust = await TrustStore.load(appDir);
       final pluginSettings = await PluginSettings.load(appDir);
       _receiveDir = await _resolveReceiveDir();
+      _artDir = Directory('${appDir.path}/album-art');
+      await _artDir!.create(recursive: true);
       final listener = TcpListener();
       final port = await listener.start();
       final discovery = Discovery(identity: identity, tcpPort: port);
@@ -226,11 +285,115 @@ class AppState extends ChangeNotifier {
           }
         case 'kdeconnect.share.request':
           await _handleShareRequest(conn, packet);
+        case 'kdeconnect.mpris':
+          await _handleMpris(conn, packet);
+        case 'kdeconnect.runcommand':
+          _handleRunCommandList(conn, packet);
+        case 'kdeconnect.runcommand.output':
+          _handleRunCommandOutput(conn, packet);
       }
     } catch (e) {
       _logLine('Gagal menangani ${packet.type}: $e');
     }
     notifyListeners();
+  }
+
+  /// M3: a kdeconnect.mpris packet arrived: a player list, a
+  /// now-playing state, or an album-art payload. State updates pick
+  /// the first player automatically; art is pulled once per url.
+  Future<void> _handleMpris(DeviceConnection conn, Packet packet) async {
+    final deviceId = conn.remoteDeviceId;
+    if (deviceId == null) return;
+    final list = MprisPlayerState.playerListOf(packet);
+    if (list != null) {
+      _playerLists[deviceId] = list;
+      final selected = _selectedPlayers[deviceId];
+      if ((selected == null || !list.contains(selected)) &&
+          list.isNotEmpty) {
+        _selectedPlayers[deviceId] = list.first;
+      }
+      if (list.isEmpty) _selectedPlayers.remove(deviceId);
+      return;
+    }
+    if (MprisPlayerState.isAlbumArtPacket(packet)) {
+      await _saveAlbumArt(conn, packet);
+      return;
+    }
+    final state = MprisPlayerState.fromPacket(packet);
+    if (state.player.isEmpty) return;
+    (_playerStates[deviceId] ??= {})[state.player] = state;
+    _selectedPlayers.putIfAbsent(deviceId, () => state.player);
+    final artUrl = state.albumArtUrl;
+    if (artUrl.startsWith('file://') &&
+        albumArtPathFor(deviceId, state.player) == null) {
+      final key = '$deviceId|${state.player}|$artUrl';
+      if (_artRequested.add(key)) {
+        try {
+          await conn.requestMprisAlbumArt(state.player, artUrl);
+        } catch (e) {
+          _logLine('Gagal meminta sampul album: $e');
+        }
+      }
+    }
+  }
+
+  /// M3: the art payload for a player arrived; save it under the
+  /// app's art dir and remember the path for the multimedia page.
+  Future<void> _saveAlbumArt(DeviceConnection conn, Packet packet) async {
+    final deviceId = conn.remoteDeviceId;
+    final dir = _artDir;
+    if (deviceId == null || dir == null) return;
+    final player = packet.body['player'] as String? ?? '';
+    final url = packet.body['albumArtUrl'] as String? ?? '';
+    final ext = url.split('.').lastOrNull ?? '';
+    final safePlayer = player.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    final filename = ext.length <= 5 && ext.isNotEmpty
+        ? '$deviceId-$safePlayer.$ext'
+        : '$deviceId-$safePlayer';
+    try {
+      final bytes = await conn.receiveBytes(packet);
+      final file = File('${dir.path}/$filename');
+      await file.writeAsBytes(bytes);
+      _albumArtPaths['$deviceId|$player'] = file.path;
+      _logLine('Sampul album diterima untuk $player (${bytes.length} byte)');
+    } catch (e) {
+      _logLine('Gagal menerima sampul album: $e');
+    }
+  }
+
+  /// M3: a kdeconnect.runcommand packet arrived with the desktop's
+  /// predefined command list (a JSON string, see runcommand.dart).
+  void _handleRunCommandList(DeviceConnection conn, Packet packet) {
+    final deviceId = conn.remoteDeviceId;
+    if (deviceId == null) return;
+    _commandLists[deviceId] = parseCommandList(packet);
+    _canAddCommands[deviceId] = canAddCommandOf(packet);
+    _logLine(
+      'Daftar perintah diterima dari ${conn.remoteName} '
+      '(${_commandLists[deviceId]!.length} perintah)',
+    );
+  }
+
+  /// M3: one streamed runcommand.output event arrived (started,
+  /// output lines, or finished with the exit code).
+  void _handleRunCommandOutput(DeviceConnection conn, Packet packet) {
+    final deviceId = conn.remoteDeviceId;
+    if (deviceId == null) return;
+    final event = RunCommandOutput.fromPacket(packet);
+    if (event == null) return;
+    final events = _commandEvents[deviceId] ??= [];
+    events.add(event);
+    if (events.length > 500) events.removeRange(0, events.length - 500);
+    switch (event.kind) {
+      case RunCommandOutput.started:
+        _runningCommandIds[deviceId] = event.id;
+      case RunCommandOutput.finished:
+        if (_runningCommandIds[deviceId] == event.id) {
+          _runningCommandIds[deviceId] = null;
+        }
+      default:
+        break;
+    }
   }
 
   /// Clipboard text arrived from a peer: set the phone clipboard,
@@ -403,6 +566,137 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+
+  /// M3: ask a device for its player list. State packets arrive on
+  /// their own afterwards (the daemon pushes them when players
+  /// appear, change, or answer an action).
+  Future<void> requestMprisPlayers(String deviceId) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.requestMprisPlayerList();
+    } catch (e) {
+      _logLine('Gagal meminta daftar player: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: pick which desktop player the multimedia page controls.
+  /// The page also asks for a fresh state right away.
+  Future<void> selectMprisPlayer(String deviceId, String player) async {
+    _selectedPlayers[deviceId] = player;
+    final conn = _connections[deviceId];
+    if (conn != null) {
+      try {
+        await conn.requestMprisNowPlaying(player);
+      } catch (e) {
+        _logLine('Gagal meminta status player: $e');
+      }
+    }
+    notifyListeners();
+  }
+
+  /// M3: send a playback action to the selected player.
+  Future<void> sendMprisAction(String deviceId, String action) async {
+    final conn = _connections[deviceId];
+    final player = _selectedPlayers[deviceId];
+    if (conn == null || player == null) return;
+    try {
+      await conn.sendMprisAction(player, action);
+    } catch (e) {
+      _logLine('Kendali multimedia gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: set the selected player's volume, 0..100.
+  Future<void> setMprisVolume(String deviceId, int volume) async {
+    final conn = _connections[deviceId];
+    final player = _selectedPlayers[deviceId];
+    if (conn == null || player == null) return;
+    try {
+      await conn.sendMprisVolume(player, volume);
+    } catch (e) {
+      _logLine('Atur volume gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: seek the selected player relative to now, in seconds
+  /// (negative seeks back; the daemon takes microseconds).
+  Future<void> seekMpris(String deviceId, int seconds) async {
+    final conn = _connections[deviceId];
+    final player = _selectedPlayers[deviceId];
+    if (conn == null || player == null) return;
+    try {
+      await conn.sendMprisSeek(player, seconds * 1000000);
+    } catch (e) {
+      _logLine('Seek gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: jump the selected player to an absolute position, in seconds.
+  Future<void> setMprisPosition(String deviceId, int seconds) async {
+    final conn = _connections[deviceId];
+    final player = _selectedPlayers[deviceId];
+    if (conn == null || player == null) return;
+    try {
+      await conn.sendMprisSetPosition(player, seconds * 1000000);
+    } catch (e) {
+      _logLine('Pindah posisi gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: ask a device for its predefined command list.
+  Future<void> requestRunCommands(String deviceId) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.requestRunCommandList();
+    } catch (e) {
+      _logLine('Gagal meminta daftar perintah: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: run one predefined command on a device by its key. Output
+  /// streams back as runcommand.output packets.
+  Future<void> runCommand(String deviceId, String key) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.runRemoteCommand(key);
+    } catch (e) {
+      _logLine('Jalankan perintah gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: stop every command this phone started on a device.
+  Future<void> stopCommands(String deviceId) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.stopRemoteCommands();
+    } catch (e) {
+      _logLine('Hentikan perintah gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M3: ask the desktop to open its command editor.
+  Future<void> requestCommandSetup(String deviceId) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.requestRunCommandSetup();
+    } catch (e) {
+      _logLine('Buka editor perintah gagal: $e');
+    }
+    notifyListeners();
+  }
 
   /// Send clipboard content to a device. Returns false when there is
   /// no connection or the content is empty; over-long content throws

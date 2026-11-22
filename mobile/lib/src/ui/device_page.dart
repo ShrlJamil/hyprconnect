@@ -17,6 +17,8 @@ import 'app_state.dart';
 import 'clipboard_page.dart';
 import 'encryption_info_page.dart';
 import 'feature_placeholder_page.dart';
+import 'multimedia_page.dart';
+import 'runcommand_page.dart';
 import 'plugin_settings_page.dart';
 import 'share_page.dart';
 
@@ -134,6 +136,28 @@ class _DevicePageState extends State<DevicePage> {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (context) => SharePage(
+            appState: _appState,
+            entry: _entry,
+          ),
+        ),
+      );
+      return;
+    }
+    if (pluginId == 'mpris') {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => MultimediaPage(
+            appState: _appState,
+            entry: _entry,
+          ),
+        ),
+      );
+      return;
+    }
+    if (pluginId == 'runcommand') {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => RunCommandPage(
             appState: _appState,
             entry: _entry,
           ),

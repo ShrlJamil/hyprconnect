@@ -24,6 +24,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'identity.dart';
+import 'mpris.dart';
+import 'runcommand.dart';
 import 'packet.dart';
 import 'payload.dart';
 import 'trust_store.dart';
@@ -505,6 +507,129 @@ class DeviceConnection {
       deviceName: remoteName ?? '',
       receivedAt: DateTime.now(),
     );
+  }
+
+  /// Multimedia control (M3): ask for the desktop player list.
+  /// The daemon answers with one kdeconnect.mpris state packet per
+  /// player plus a final {"playerList": [...]} packet.
+  Future<void> requestMprisPlayerList() async {
+    await sendPacket(mprisRequestPlayerList());
+  }
+
+  /// Ask for one player's current now-playing state.
+  Future<void> requestMprisNowPlaying(String player) async {
+    await sendPacket(mprisRequestNowPlaying(player));
+  }
+
+  /// Send one playback action (Play, Pause, PlayPause, Next,
+  /// Previous, Stop). The daemon pushes a fresh state packet after
+  /// the action lands.
+  Future<void> sendMprisAction(String player, String action) async {
+    await sendPacket(mprisAction(player, action));
+  }
+
+  /// Set the player volume, 0..100 (clamped by the packet builder).
+  Future<void> sendMprisVolume(String player, int volume) async {
+    await sendPacket(mprisSetVolume(player, volume));
+  }
+
+  /// Seek relative to the current position, in microseconds
+  /// (10 seconds = 10000000).
+  Future<void> sendMprisSeek(String player, int microseconds) async {
+    await sendPacket(mprisSeek(player, microseconds));
+  }
+
+  /// Jump to an absolute position, in microseconds.
+  Future<void> sendMprisSetPosition(String player, int microseconds) async {
+    await sendPacket(mprisSetPosition(player, microseconds));
+  }
+
+  /// Pull the album art for a file:// url the daemon currently
+  /// reports for this player. The answer is a kdeconnect.mpris
+  /// packet flagged transferringAlbumArt with a payload; read it
+  /// with [receiveBytes].
+  Future<void> requestMprisAlbumArt(String player, String url) async {
+    await sendPacket(mprisRequestAlbumArt(player, url));
+  }
+
+  /// Run commands (M3): ask for the desktop's predefined list.
+  Future<void> requestRunCommandList() async {
+    await sendPacket(runCommandRequestList());
+  }
+
+  /// Run one predefined command by its key. The daemon streams
+  /// kdeconnect.runcommand.output packets back on this channel.
+  Future<void> runRemoteCommand(String key) async {
+    await sendPacket(runCommandRun(key));
+  }
+
+  /// Stop every command this phone started (the daemon kills them).
+  Future<void> stopRemoteCommands() async {
+    await sendPacket(runCommandStop());
+  }
+
+  /// Ask the desktop to open its command editor.
+  Future<void> requestRunCommandSetup() async {
+    await sendPacket(runCommandSetup());
+  }
+
+  /// Receive a payload the peer offered (album art, or any packet
+  /// with payloadSize/payloadTransferInfo) into memory: connect to
+  /// its payload port as the TLS client, verify the peer CN, and
+  /// read exactly payloadSize bytes.
+  Future<Uint8List> receiveBytes(Packet packet) async {
+    final peerId = remoteDeviceId;
+    final address = remoteAddress;
+    if (peerId == null || address == null) {
+      throw StateError('not connected');
+    }
+    final size = packet.payloadSize;
+    final port = (packet.payloadTransferInfo?['port'] as num?)?.toInt();
+    if (size == null || size < 0 || port == null) {
+      throw const FormatException('packet without payload info');
+    }
+    final raw = await Socket.connect(
+      address,
+      port,
+      timeout: const Duration(seconds: 10),
+    );
+    final secure = await SecureSocket.secure(
+      raw,
+      host: peerId,
+      context: _clientContext(),
+      onBadCertificate: (_) => true,
+    ).timeout(const Duration(seconds: 10));
+    try {
+      final presented = secure.peerCertificate;
+      if (presented == null) {
+        throw const SocketException('payload peer presented no certificate');
+      }
+      final info = LocalIdentity.certInfo(presented.der);
+      if (info.commonName != peerId) {
+        throw SocketException(
+          'payload peer CN ${info.commonName} is not $peerId',
+        );
+      }
+      final out = BytesBuilder();
+      var remaining = size;
+      await for (final chunk in secure) {
+        if (remaining <= 0) break;
+        final take = chunk.length <= remaining
+            ? chunk
+            : chunk.sublist(0, remaining);
+        out.add(take);
+        remaining -= take.length;
+        if (remaining == 0) break;
+      }
+      if (remaining > 0) {
+        throw StateError(
+          'payload ended early, $remaining of $size bytes missing',
+        );
+      }
+      return out.takeBytes();
+    } finally {
+      await secure.close();
+    }
   }
 
   Future<void> sendPing([String? message]) async {

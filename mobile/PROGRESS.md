@@ -116,8 +116,36 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
       (5) file_picker 13 mengubah API: `FilePicker.pickFile()` statis,
       `PlatformFile` tanpa `size` (pakai `length()` dan
       `readAsByteStream()`).
-- [ ] M3 Multimedia control (control the desktop players from the phone)
+- [x] M3 Multimedia control (control the desktop players from the phone)
       and Run commands (list, run, streamed output).
+      SELESAI 2026-11-22 14:34. Bukti: `flutter test --concurrency=1`
+      53/53 lolos + 1 skip wajar (tes interop M3 tanpa fixture);
+      `flutter analyze` bersih; `flutter build apk --debug` berhasil
+      (mobile/build/app/outputs/flutter-apk/app-debug.apk, 181 MB).
+      Bukti hidup dari log daemon (14:32:27): `pairing completed with
+      0fb35563...`, `mpris.request ... {"requestPlayerList":true}`,
+      `mpris Pause -> mpv`, `mpris Play -> mpv`, `setVolume: 50`,
+      `SetPosition: 5000000`; tes mencatat daftar perintah daemon
+      `[cmd1795325153461, m3-interop-echo]` dan output streaming
+      `[m3-interop-hello, baris-kedua, selesai]` lalu finished sukses
+      kode keluar 0. Daemon TIDAK diubah sama sekali; tes interop M0/M2
+      tetap lolos.
+      Catatan penting: (1) mpv 0.42 di laptop TIDAK mendaftarkan
+      org.mpris.MediaPlayer2, jadi bukti MPRIS live memakai player
+      palsu kecil via D-Bus (dbus-python, /tmp, sudah dihapus) yang
+      berbicara antarmuka MPRIS persis seperti yang dibaca daemon
+      (Identity/Metadata/PlaybackStatus/Volume/Position + sinyal
+      PropertiesChanged); (2) perintah tes `m3-interop-echo` sempat
+      ditambahkan ke commands.json lalu DIHAPUS dan daemon di-restart
+      dua kali lewat compositor — commands.json kini kembali seperti
+      semula (hanya Terminal/kitty), daemon active, port 1714 listen;
+      (3) tarik sampul album (transferringAlbumArt + receiveBytes)
+      sudah diimplementasikan tapi BELUM terbukti live karena player
+      palsu tidak punya sampul — perlu player sungguhan ber-sampul
+      saat ada kesempatan; (4) parseCommandList kini tahan JSON rusak
+      (ditemukan tes: jsonDecode melempar); (5) tes interop M3 skip
+      dengan jujur bila mpv tidak jalan atau perintah tes tidak ada,
+      seperti pola skip M2 saat daemon mati.
 - [ ] M4 Remote input: touchpad and keyboard to the desktop
       (kdeconnect.mousepad.request, same semantics as the daemon already
       implements for the stock app).
@@ -175,5 +203,28 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
   payload dua arah), test/clipboard_page_test.dart (2 widget),
   test/interop_m2_test.dart (1: empat arah melawan daemon).
   Dependensi baru: file_picker ^13.4.1 (pub.dev publik).
-- Next step: M3 — Kendali multimedia (kendali player desktop dari HP)
-  dan Jalankan Perintah (daftar, jalankan, output streaming).
+- 2026-11-22 14:34 M3 selesai (lihat centang di atas). File baru:
+  mobile/lib/src/protocol/mpris.dart (model state + pembangun paket
+  requestPlayerList/requestNowPlaying/action/setVolume/Seek/
+  SetPosition/albumArt; aksi hanya 6 yang dikenal daemon),
+  mobile/lib/src/protocol/runcommand.dart (parse commandList string
+  JSON + event output started/output/finished + pembangun paket
+  list/run/stop/setup), mobile/lib/src/ui/multimedia_page.dart
+  (pilih player, kartu now-playing + sampul, slider posisi dan
+  volume, tombol putar/jeda/sebelum/berikut/berhenti/mundur-maju
+  10 detik), mobile/lib/src/ui/runcommand_page.dart (daftar
+  perintah, jalankan, log output streaming, tombol hentikan,
+  ubah daftar di desktop). DeviceConnection: metode kirim M3 +
+  receiveBytes (payload ke memori untuk sampul album). AppState:
+  state MPRIS per perangkat (daftar player, state, player terpilih,
+  jalur sampul, minta sampul sekali per URL) + state runcommand
+  (daftar perintah, canAddCommand, event output maks 500, id
+  perintah berjalan). Ubin Kendali multimedia dan Jalankan Perintah
+  kini membuka halaman sungguhan. Tes baru: test/mpris_test.dart
+  (11), test/runcommand_test.dart (5), test/multimedia_page_test.dart
+  (3 widget, kartu ter-render sungguhan via hook
+  registerTestConnection), test/runcommand_page_test.dart (2 widget),
+  test/interop_m3_test.dart (1 live). Daemon TIDAK diubah.
+- Next step: M4 — Masukan jarak jauh: touchpad dan keyboard ke
+  desktop (kdeconnect.mousepad.request, semantik sama seperti yang
+  sudah diimplementasikan daemon untuk aplikasi bawaan).

@@ -5,7 +5,7 @@
 
 use adw::prelude::*;
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, Button, Image, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow};
+use gtk4::{Box as GtkBox, Button, Image, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, Separator};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Write};
@@ -80,6 +80,9 @@ fn panel_title(panel: Panel) -> &'static str {
 struct AppState {
     window: adw::ApplicationWindow,
     sidebar: ListBox,
+    /// Parallel to the sidebar rows: the device id for device rows,
+    /// None for section headers and placeholders.
+    sidebar_ids: RefCell<Vec<Option<String>>>,
     detail: GtkBox,
     selected: RefCell<Option<String>>,
     devices: RefCell<Vec<Value>>,
@@ -210,6 +213,7 @@ fn build_ui(app: &adw::Application) {
         window,
         sidebar,
         detail,
+        sidebar_ids: RefCell::new(Vec::new()),
         selected: RefCell::new(None),
         devices: RefCell::new(Vec::new()),
         last_json: RefCell::new(String::new()),
@@ -384,11 +388,7 @@ fn build_ui(app: &adw::Application) {
     state.sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
             let idx = row.index() as usize;
-            let id = st
-                .devices
-                .borrow()
-                .get(idx)
-                .and_then(|d| d["deviceId"].as_str().map(|s| s.to_string()));
+            let id = st.sidebar_ids.borrow().get(idx).cloned().flatten();
             if id.is_some() {
                 *st.selected.borrow_mut() = id;
                 *st.view.borrow_mut() = DetailView::Device;
@@ -521,40 +521,89 @@ fn rebuild_sidebar(state: &Rc<AppState>) {
     }
     let devices = state.devices.borrow();
     let selected = state.selected.borrow().clone();
-    for dev in devices.iter() {
-        let id = dev["deviceId"].as_str().unwrap_or("");
-        let name = dev["name"].as_str().unwrap_or("(unknown)").trim().to_string();
-        let dtype = dev["type"].as_str().unwrap_or("");
-        let row_box = GtkBox::new(Orientation::Horizontal, 10);
-        row_box.set_margin_top(6);
-        row_box.set_margin_bottom(6);
-        row_box.set_margin_start(6);
-        row_box.set_margin_end(6);
-        let icon = Image::from_icon_name(device_icon(dtype));
-        icon.set_pixel_size(20);
-        row_box.append(&icon);
-        let texts = GtkBox::new(Orientation::Vertical, 1);
-        let name_label = Label::new(Some(&name));
-        name_label.set_halign(gtk4::Align::Start);
-        texts.append(&name_label);
-        let status = Label::new(Some(&status_line(dev)));
-        status.add_css_class("dim-label");
-        status.set_halign(gtk4::Align::Start);
-        texts.append(&status);
-        row_box.append(&texts);
-        let row = ListBoxRow::new();
-        row.set_child(Some(&row_box));
-        state.sidebar.append(&row);
-        if selected.as_deref() == Some(id) {
-            state.sidebar.select_row(Some(&row));
-        }
-    }
-    if devices.is_empty() {
-        let l = Label::new(Some("No devices discovered"));
+    let mut ids: Vec<Option<String>> = Vec::new();
+
+    let connected: Vec<&Value> = devices
+        .iter()
+        .filter(|d| d["connected"].as_bool().unwrap_or(false))
+        .collect();
+    let available: Vec<&Value> = devices
+        .iter()
+        .filter(|d| {
+            !d["connected"].as_bool().unwrap_or(false)
+                && d["available"].as_bool().unwrap_or(false)
+        })
+        .collect();
+
+    if connected.is_empty() && available.is_empty() {
+        let l = Label::new(Some("No devices found"));
         l.add_css_class("dim-label");
         l.set_margin_top(10);
         state.sidebar.append(&l);
+        ids.push(None);
+    } else {
+        for (title, group) in [("Connected", &connected), ("Available", &available)] {
+            if group.is_empty() {
+                continue;
+            }
+            state.sidebar.append(&section_header(title));
+            ids.push(None);
+            for dev in group {
+                let id = dev["deviceId"].as_str().unwrap_or("");
+                let name = dev["name"].as_str().unwrap_or("(unknown)").trim().to_string();
+                let dtype = dev["type"].as_str().unwrap_or("");
+                let row_box = GtkBox::new(Orientation::Horizontal, 10);
+                row_box.set_margin_top(6);
+                row_box.set_margin_bottom(6);
+                row_box.set_margin_start(6);
+                row_box.set_margin_end(6);
+                let icon = Image::from_icon_name(device_icon(dtype));
+                icon.set_pixel_size(20);
+                row_box.append(&icon);
+                let texts = GtkBox::new(Orientation::Vertical, 1);
+                let name_label = Label::new(Some(&name));
+                name_label.set_halign(gtk4::Align::Start);
+                texts.append(&name_label);
+                let status = Label::new(Some(&status_line(dev)));
+                status.add_css_class("dim-label");
+                status.set_halign(gtk4::Align::Start);
+                texts.append(&status);
+                row_box.append(&texts);
+                let row = ListBoxRow::new();
+                row.set_child(Some(&row_box));
+                state.sidebar.append(&row);
+                ids.push(Some(id.to_string()));
+                if selected.as_deref() == Some(id) {
+                    state.sidebar.select_row(Some(&row));
+                }
+            }
+        }
     }
+    *state.sidebar_ids.borrow_mut() = ids;
+}
+
+/// A sidebar section header: the title followed by a line that fills
+/// the rest of the row ("Connected ───────"). Not selectable.
+fn section_header(title: &str) -> ListBoxRow {
+    let hbox = GtkBox::new(Orientation::Horizontal, 8);
+    hbox.set_margin_start(12);
+    hbox.set_margin_end(12);
+    hbox.set_margin_top(12);
+    hbox.set_margin_bottom(2);
+    let label = Label::new(Some(title));
+    label.add_css_class("caption-heading");
+    label.add_css_class("dim-label");
+    hbox.append(&label);
+    let line = Separator::new(Orientation::Horizontal);
+    line.set_hexpand(true);
+    line.set_valign(gtk4::Align::Center);
+    line.add_css_class("dim-label");
+    hbox.append(&line);
+    let row = ListBoxRow::new();
+    row.set_child(Some(&hbox));
+    row.set_selectable(false);
+    row.set_activatable(false);
+    row
 }
 
 fn clear_box(b: &GtkBox) {

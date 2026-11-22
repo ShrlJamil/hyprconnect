@@ -69,11 +69,16 @@ impl DeviceInfo {
     }
 
     fn to_json(&self, local_spki: &[u8]) -> Value {
+        let available = self
+            .last_seen
+            .map(|t| t.elapsed() < Duration::from_secs(60))
+            .unwrap_or(false);
         let mut v = json!({
             "deviceId": self.id,
             "name": self.name,
             "type": self.dtype,
             "connected": self.connected,
+            "available": available,
             "paired": self.paired,
             "pendingIn": self.pending_in,
             "pendingOut": self.pending_out,

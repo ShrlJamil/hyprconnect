@@ -25,6 +25,7 @@ import 'dart:typed_data';
 
 import 'identity.dart';
 import 'mpris.dart';
+import 'mousepad.dart';
 import 'runcommand.dart';
 import 'packet.dart';
 import 'payload.dart';
@@ -150,9 +151,7 @@ class DeviceConnection {
     }
     final packet = Packet.fromJson(parsed);
     if (packet.type != 'kdeconnect.identity') {
-      throw FormatException(
-        'first packet is not identity: ${packet.type}',
-      );
+      throw FormatException('first packet is not identity: ${packet.type}');
     }
     final deviceId = packet.body['deviceId'] as String?;
     if (deviceId == null || !LocalIdentity.validDeviceId(deviceId)) {
@@ -245,11 +244,7 @@ class DeviceConnection {
         .cast<List<int>>()
         .transform(utf8.decoder)
         .transform(const LineSplitter())
-        .listen(
-          _onLine,
-          onError: (_) => close(),
-          onDone: () => close(),
-        );
+        .listen(_onLine, onError: (_) => close(), onDone: () => close());
   }
 
   void _onLine(String line) {
@@ -342,7 +337,6 @@ class DeviceConnection {
     _setPairState(PairState.unpaired);
   }
 
-
   /// Send clipboard content to the peer (kdeconnect.clipboard).
   /// Content longer than the daemon's limit is refused up front:
   /// the daemon would silently drop it.
@@ -352,9 +346,7 @@ class DeviceConnection {
         'clipboard content exceeds $maxClipboardChars characters',
       );
     }
-    await sendPacket(
-      Packet.now('kdeconnect.clipboard', {'content': content}),
-    );
+    await sendPacket(Packet.now('kdeconnect.clipboard', {'content': content}));
   }
 
   /// Offer a file to the peer (kdeconnect.share.request + payload).
@@ -397,9 +389,7 @@ class DeviceConnection {
           payloadTransferInfo: {'port': server.port},
         ),
       );
-      final raw = await server.first.timeout(
-        const Duration(seconds: 120),
-      );
+      final raw = await server.first.timeout(const Duration(seconds: 120));
       final secure = await SecureSocket.secureServer(
         raw,
         _serverContext(peerCert),
@@ -448,9 +438,7 @@ class DeviceConnection {
     if (size == null || size < 0 || port == null) {
       throw const FormatException('share.request without payload info');
     }
-    final filename = sanitizeSharedFilename(
-      packet.body['filename'] as String?,
-    );
+    final filename = sanitizeSharedFilename(packet.body['filename'] as String?);
     final raw = await Socket.connect(
       address,
       port,
@@ -571,6 +559,55 @@ class DeviceConnection {
   /// Ask the desktop to open its command editor.
   Future<void> requestRunCommandSetup() async {
     await sendPacket(runCommandSetup());
+  }
+
+  /// Remote input (M4): move the desktop pointer by a relative delta,
+  /// in layout pixels. The daemon accumulates deltas and flushes them
+  /// to its virtual pointer, so callers can send every drag update.
+  Future<void> sendMousepadMove(double dx, double dy) async {
+    await sendPacket(mousepadMove(dx, dy));
+  }
+
+  /// Remote input (M4): scroll by a relative delta (positive dy
+  /// scrolls down).
+  Future<void> sendMousepadScroll(double dx, double dy) async {
+    await sendPacket(mousepadScroll(dx, dy));
+  }
+
+  /// Remote input (M4): click one mouse button.
+  Future<void> sendMousepadClick(MousepadClick click) async {
+    await sendPacket(mousepadClick(click));
+  }
+
+  /// Remote input (M4): press the left button down (true) or let it
+  /// up again (false), for dragging while the touchpad is held.
+  Future<void> sendMousepadHold(bool down) async {
+    await sendPacket(mousepadHold(down));
+  }
+
+  /// Remote input (M4): type one printable character, with optional
+  /// modifiers (Ctrl/Alt/Shift/Super).
+  Future<void> sendMousepadKey(
+    String char, [
+    MousepadModifiers modifiers = const MousepadModifiers(),
+  ]) async {
+    await sendPacket(mousepadKey(char, modifiers));
+  }
+
+  /// Remote input (M4): type a whole string at once (the daemon runs
+  /// `ydotool type`).
+  Future<void> sendMousepadType(String text) async {
+    await sendPacket(mousepadType(text));
+  }
+
+  /// Remote input (M4): press one special key by its daemon code
+  /// (1 Backspace, 12 Enter, 14 Esc, 21..32 F1..F12, ...), with
+  /// optional modifiers.
+  Future<void> sendMousepadSpecialKey(
+    int code, [
+    MousepadModifiers modifiers = const MousepadModifiers(),
+  ]) async {
+    await sendPacket(mousepadSpecialKey(code, modifiers));
   }
 
   /// Receive a payload the peer offered (album art, or any packet

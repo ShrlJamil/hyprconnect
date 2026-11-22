@@ -146,9 +146,32 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
       (ditemukan tes: jsonDecode melempar); (5) tes interop M3 skip
       dengan jujur bila mpv tidak jalan atau perintah tes tidak ada,
       seperti pola skip M2 saat daemon mati.
-- [ ] M4 Remote input: touchpad and keyboard to the desktop
+- [x] M4 Remote input: touchpad and keyboard to the desktop
       (kdeconnect.mousepad.request, same semantics as the daemon already
       implements for the stock app).
+      SELESAI 2026-11-22 14:50. Bukti: `flutter test --concurrency=1`
+      80/80 lolos + 1 skip wajar (tes interop M3 tanpa fixture mpv);
+      `flutter analyze` bersih; `flutter build apk --debug` berhasil
+      (mobile/build/app/outputs/flutter-apk/app-debug.apk, 181 MB).
+      Bukti hidup dari log daemon (14:49:30): `pairing completed with
+      dec3d634...` dan `mousepad specialKey 999 (unknown)`; gerak
+      pointer terbukti lewat hyprctl cursorpos — kursor bergerak
+      mengikuti delta yang dikirim lalu dikembalikan ke posisi awal
+      (1735, 640). Daemon TIDAK diubah sama sekali; tes interop M0/M2
+      tetap lolos.
+      Catatan penting: (1) klik dan gulir sengaja TIDAK dibuktikan
+      live — tidak ada sinyal yang bisa diamati di sisi daemon selain
+      efeknya sendiri (klik akan menekan apa pun yang ada di bawah
+      kursor di desktop yang sedang dipakai); bentuk paketnya
+      dibuktikan tes unit + tes widget lewat koneksi perekam;
+      (2) touchpad memakai Listener mentah, bukan GestureDetector —
+      arena gesture akan mematikan seret yang mengikuti tekan-lama;
+      (3) tes widget butuh viewport tinggi (2400 px) karena ListView
+      hanya membangun isi yang terlihat di layar; scrollUntilVisible
+      tidak bisa dipakai (finder Scrollable-nya ambigu dengan
+      Scrollable internal TextField); (4) jalur tombol dibuktikan
+      tanpa efek samping: specialKey tak dikenal hanya dicatat
+      daemon, jadi dipakai sebagai probe.
 - [ ] M5 Presentation remote with HyprPresenter parity: gyro and drag
       pointer (kdeconnect.presenter), next/previous, monitor selection
       (additive daemon extension: the app may ask for the monitor list
@@ -225,6 +248,20 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
   (3 widget, kartu ter-render sungguhan via hook
   registerTestConnection), test/runcommand_page_test.dart (2 widget),
   test/interop_m3_test.dart (1 live). Daemon TIDAK diubah.
-- Next step: M4 — Masukan jarak jauh: touchpad dan keyboard ke
-  desktop (kdeconnect.mousepad.request, semantik sama seperti yang
-  sudah diimplementasikan daemon untuk aplikasi bawaan).
+- 2026-11-22 14:50 M4 selesai (lihat centang di atas). File baru:
+  mobile/lib/src/protocol/mousepad.dart (pembangun paket gerak/gulir/
+  klik/tahan/kunci/tombol-khusus + tabel specialKey 1..32 persis
+  daemon), mobile/lib/src/ui/remote_input_page.dart (touchpad
+  Listener mentah + keyboard ketik-langsung dengan diff, modifier
+  sticky, tombol khusus, panah, F1..F12, tempel papan klip).
+  DeviceConnection: metode kirim M4; AppState: wrapper M4; ubin
+  Masukan jarak jauh kini membuka halaman sungguhan. Tes baru:
+  test/mousepad_test.dart (14), test/remote_input_page_test.dart
+  (12 widget, koneksi perekam), test/interop_m4_test.dart (1 live).
+  Daemon TIDAK diubah.
+- Next step: M5 — Presentation remote dengan paritas HyprPresenter:
+  pointer gyro dan seret (kdeconnect.presenter), next/previous,
+  pemilihan monitor (ekstensi daemon aditif: app boleh meminta daftar
+  monitor dan memilih monitor presenter; klien bawaan tidak
+  terpengaruh), catatan presenter tersimpan lokal di HP dan tampil di
+  layar presenter.

@@ -19,6 +19,7 @@ import 'encryption_info_page.dart';
 import 'feature_placeholder_page.dart';
 import 'multimedia_page.dart';
 import 'runcommand_page.dart';
+import 'remote_input_page.dart';
 import 'plugin_settings_page.dart';
 import 'share_page.dart';
 
@@ -58,9 +59,8 @@ class _DevicePageState extends State<DevicePage> {
   DeviceListEntry get _entry => widget.entry;
 
   void _snack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _connect() async {
@@ -127,18 +127,13 @@ class _DevicePageState extends State<DevicePage> {
       return;
     }
     if (!_appState.pluginSettings.isEnabled(_entry.deviceId, pluginId)) {
-      _snack(
-        'Plugin $title nonaktif. Aktifkan di Pengesetan plugin.',
-      );
+      _snack('Plugin $title nonaktif. Aktifkan di Pengesetan plugin.');
       return;
     }
     if (pluginId == 'share') {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (context) => SharePage(
-            appState: _appState,
-            entry: _entry,
-          ),
+          builder: (context) => SharePage(appState: _appState, entry: _entry),
         ),
       );
       return;
@@ -146,10 +141,8 @@ class _DevicePageState extends State<DevicePage> {
     if (pluginId == 'mpris') {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (context) => MultimediaPage(
-            appState: _appState,
-            entry: _entry,
-          ),
+          builder: (context) =>
+              MultimediaPage(appState: _appState, entry: _entry),
         ),
       );
       return;
@@ -157,10 +150,17 @@ class _DevicePageState extends State<DevicePage> {
     if (pluginId == 'runcommand') {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (context) => RunCommandPage(
-            appState: _appState,
-            entry: _entry,
-          ),
+          builder: (context) =>
+              RunCommandPage(appState: _appState, entry: _entry),
+        ),
+      );
+      return;
+    }
+    if (pluginId == 'remoteinput') {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) =>
+              RemoteInputPage(appState: _appState, entry: _entry),
         ),
       );
       return;
@@ -168,10 +168,8 @@ class _DevicePageState extends State<DevicePage> {
     if (pluginId == 'clipboard') {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (context) => ClipboardPage(
-            appState: _appState,
-            entry: _entry,
-          ),
+          builder: (context) =>
+              ClipboardPage(appState: _appState, entry: _entry),
         ),
       );
       return;
@@ -278,10 +276,7 @@ class _DevicePageState extends State<DevicePage> {
             children: [
               Card(
                 child: ListTile(
-                  leading: Icon(
-                    _deviceIcon(_entry.deviceType),
-                    size: 36,
-                  ),
+                  leading: Icon(_deviceIcon(_entry.deviceType), size: 36),
                   title: Text(name),
                   subtitle: Text(
                     '${_entry.deviceType}'
@@ -313,9 +308,7 @@ class _DevicePageState extends State<DevicePage> {
                         Center(
                           child: SelectableText(
                             conn.verificationKey ?? '-',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineMedium
+                            style: Theme.of(context).textTheme.headlineMedium
                                 ?.copyWith(letterSpacing: 4),
                           ),
                         ),
@@ -324,18 +317,16 @@ class _DevicePageState extends State<DevicePage> {
                           children: [
                             Expanded(
                               child: FilledButton(
-                                onPressed: () => _appState.requestPair(
-                                  _entry.deviceId,
-                                ),
+                                onPressed: () =>
+                                    _appState.requestPair(_entry.deviceId),
                                 child: const Text('Terima'),
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: OutlinedButton(
-                                onPressed: () => _appState.rejectPair(
-                                  _entry.deviceId,
-                                ),
+                                onPressed: () =>
+                                    _appState.rejectPair(_entry.deviceId),
                                 child: const Text('Tolak'),
                               ),
                             ),
@@ -350,9 +341,7 @@ class _DevicePageState extends State<DevicePage> {
                 const SizedBox(height: 8),
                 FilledButton(
                   onPressed: _entry.online ? _connect : null,
-                  child: Text(
-                    _entry.online ? 'Hubungkan' : 'Perangkat luring',
-                  ),
+                  child: Text(_entry.online ? 'Hubungkan' : 'Perangkat luring'),
                 ),
               ],
               if (connected && !paired && !pendingIn) ...[
@@ -435,18 +424,16 @@ class _FeatureTile extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 title,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: foreground,
-                ),
+                style: Theme.of(context).textTheme.titleSmall
+                    ?.copyWith(color: foreground),
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: foreground,
-                ),
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: foreground),
               ),
             ],
           ),

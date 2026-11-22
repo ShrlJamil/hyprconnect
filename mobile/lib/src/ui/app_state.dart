@@ -244,7 +244,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-
   /// Files from peers land in HyprConnect/ under external storage on
   /// Android (visible in a file manager); anywhere else, under the
   /// app documents directory.
@@ -308,8 +307,7 @@ class AppState extends ChangeNotifier {
     if (list != null) {
       _playerLists[deviceId] = list;
       final selected = _selectedPlayers[deviceId];
-      if ((selected == null || !list.contains(selected)) &&
-          list.isNotEmpty) {
+      if ((selected == null || !list.contains(selected)) && list.isNotEmpty) {
         _selectedPlayers[deviceId] = list.first;
       }
       if (list.isEmpty) _selectedPlayers.remove(deviceId);
@@ -404,8 +402,7 @@ class AppState extends ChangeNotifier {
     String content,
   ) async {
     if (content.isEmpty) return;
-    if (content == _lastClipboardSent ||
-        content == _lastClipboardApplied) {
+    if (content == _lastClipboardSent || content == _lastClipboardApplied) {
       return;
     }
     _lastClipboardApplied = content;
@@ -422,10 +419,7 @@ class AppState extends ChangeNotifier {
   /// A share.request arrived: text is applied as clipboard and url is
   /// only logged, exactly like the daemon; a file is downloaded over
   /// its payload connection into the receive dir.
-  Future<void> _handleShareRequest(
-    DeviceConnection conn,
-    Packet packet,
-  ) async {
+  Future<void> _handleShareRequest(DeviceConnection conn, Packet packet) async {
     final text = packet.body['text'] as String?;
     if (text != null) {
       await _applyRemoteClipboard(conn, text);
@@ -521,9 +515,7 @@ class AppState extends ChangeNotifier {
         trust: trust,
         tcpPort: listener.port,
       );
-      conn.disabledPlugins = pluginSettings.disabledPluginsFor(
-        entry.deviceId,
-      );
+      conn.disabledPlugins = pluginSettings.disabledPluginsFor(entry.deviceId);
       await conn.connectOutgoing(
         address: address,
         tcpPort: tcpPort,
@@ -565,7 +557,6 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
   }
-
 
   /// M3: ask a device for its player list. State packets arrive on
   /// their own afterwards (the daemon pushes them when players
@@ -694,6 +685,98 @@ class AppState extends ChangeNotifier {
       await conn.requestRunCommandSetup();
     } catch (e) {
       _logLine('Buka editor perintah gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M4: move the desktop pointer by a relative delta. High-frequency
+  /// traffic: successes stay silent, failures are logged.
+  Future<void> sendMousepadMove(String deviceId, double dx, double dy) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendMousepadMove(dx, dy);
+    } catch (e) {
+      _logLine('Gerak pointer gagal: $e');
+    }
+  }
+
+  /// M4: scroll by a relative delta (positive dy scrolls down).
+  Future<void> sendMousepadScroll(String deviceId, double dx, double dy) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendMousepadScroll(dx, dy);
+    } catch (e) {
+      _logLine('Gulir gagal: $e');
+    }
+  }
+
+  /// M4: click one mouse button.
+  Future<void> sendMousepadClick(String deviceId, MousepadClick click) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendMousepadClick(click);
+    } catch (e) {
+      _logLine('Klik gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M4: press the left button down (true) or let it up (false).
+  Future<void> sendMousepadHold(String deviceId, bool down) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendMousepadHold(down);
+    } catch (e) {
+      _logLine('Tahan klik gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M4: type one printable character, with optional modifiers.
+  Future<void> sendMousepadKey(
+    String deviceId,
+    String char, [
+    MousepadModifiers modifiers = const MousepadModifiers(),
+  ]) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendMousepadKey(char, modifiers);
+    } catch (e) {
+      _logLine('Ketik gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M4: type a whole string at once.
+  Future<void> sendMousepadType(String deviceId, String text) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendMousepadType(text);
+    } catch (e) {
+      _logLine('Ketik teks gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M4: press one special key by its daemon code, with optional
+  /// modifiers.
+  Future<void> sendMousepadSpecialKey(
+    String deviceId,
+    int code, [
+    MousepadModifiers modifiers = const MousepadModifiers(),
+  ]) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendMousepadSpecialKey(code, modifiers);
+    } catch (e) {
+      _logLine('Tombol khusus gagal: $e');
     }
     notifyListeners();
   }

@@ -8,5 +8,6 @@ export 'listener.dart';
 export 'mpris.dart';
 export 'packet.dart';
 export 'runcommand.dart';
+export 'mousepad.dart';
 export 'payload.dart';
 export 'trust_store.dart';

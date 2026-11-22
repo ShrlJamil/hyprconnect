@@ -1,4 +1,6 @@
 pub mod clipboard;
+pub mod dot;
+pub mod pointer;
 pub mod identity;
 pub mod packet;
 pub mod store;

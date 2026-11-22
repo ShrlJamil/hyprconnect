@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=HyprConnect
+GenericName=Device Connectivity
+Comment=Connect to your phone: share files and clipboard, mirror notifications, control media and more
+Exec=hyprconnect-app
+Icon=io.github.ShrlJamil.hyprconnect
+Terminal=false
+Categories=Utility;
+Keywords=phone;android;kde connect;share;clipboard;notifications;
+StartupNotify=true
+StartupWMClass=io.github.ShrlJamil.hyprconnect

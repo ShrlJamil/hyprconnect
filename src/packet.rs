@@ -37,6 +37,8 @@ pub const INCOMING_CAPABILITIES: &[&str] = &[
     "kdeconnect.systemvolume.request",
     "kdeconnect.sftp",
     "kdeconnect.presenter",
+    "kdeconnect.mousepad.request",
+    "kdeconnect.runcommand.request",
     "kdeconnect.battery",
 ];
 pub const OUTGOING_CAPABILITIES: &[&str] = &[
@@ -53,6 +55,9 @@ pub const OUTGOING_CAPABILITIES: &[&str] = &[
     "kdeconnect.sftp.request",
     "kdeconnect.battery.request",
     "kdeconnect.findmyphone.request",
+    "kdeconnect.runcommand",
+    "kdeconnect.runcommand.output",
+    "kdeconnect.mousepad.request",
 ];
 
 pub fn now_ms() -> i64 {
@@ -121,8 +126,10 @@ pub const PLUGIN_NAMES: &[&str] = &[
     "systemvolume",
     "sftp",
     "presenter",
+    "remoteinput",
     "battery",
     "findmyphone",
+    "runcommand",
 ];
 
 /// Which plugin a packet type belongs to (None = core traffic that
@@ -141,6 +148,7 @@ pub fn plugin_for_packet(ptype: &str) -> Option<&'static str> {
         }
         "kdeconnect.sftp" | "kdeconnect.sftp.request" => "sftp",
         "kdeconnect.presenter" => "presenter",
+        "kdeconnect.mousepad.request" => "remoteinput",
         "kdeconnect.battery" | "kdeconnect.battery.request" => "battery",
         "kdeconnect.findmyphone.request" => "findmyphone",
         _ => return None,

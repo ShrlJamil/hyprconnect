@@ -7,6 +7,8 @@
 
 use anyhow::{Context, Result};
 use hyprconnect::clipboard;
+use hyprconnect::dot;
+use hyprconnect::pointer;
 use hyprconnect::identity::{self, LocalIdentity};
 use hyprconnect::packet::{plugin_for_packet, Packet, PLUGIN_NAMES};
 use hyprconnect::store::{hex_encode, TrustStore, TrustedDevice};
@@ -80,6 +82,9 @@ impl DeviceInfo {
             v["battery"] = json!(level);
             v["batteryCharging"] = json!(self.battery_charging);
         }
+        if let Some(ip) = self.last_ip {
+            v["host"] = json!(ip.to_string());
+        }
         if !self.peer_spki.is_empty() {
             v["verificationKey"] =
                 json!(identity::verification_key(local_spki, &self.peer_spki));
@@ -114,10 +119,22 @@ struct Inner {
     presenter_monitor: Option<String>,
     /// The phone's own media players: device id -> player -> state.
     phone_players: HashMap<String, HashMap<String, Value>>,
+    /// Phone album art saved on disk: device id -> player -> path.
+    phone_art: HashMap<String, HashMap<String, String>>,
+    /// Album art URLs already pulled from the phone: device id ->
+    /// player -> albumArtUrl.
+    phone_art_wanted: HashMap<String, HashMap<String, String>>,
     /// Plugins the user switched off in the app's plugin page.
     plugins_disabled: std::collections::HashSet<String>,
+    /// Run-command definitions the phone may execute: key -> {name, command}.
+    commands: serde_json::Map<String, Value>,
+    /// Running run-command processes: execution id -> pid.
+    running_cmds: std::collections::HashMap<u32, u32>,
+    next_cmd_id: u32,
     /// Presentation remote session state.
     presenter: PresenterState,
+    /// Touchpad deltas waiting for the next flush tick.
+    mousepad_acc: (f64, f64),
 }
 
 #[derive(Clone, PartialEq)]
@@ -161,6 +178,8 @@ struct Daemon {
     tcp_port: u16,
     inner: Mutex<Inner>,
     clipboard: Option<clipboard::ClipboardHandle>,
+    dot: Option<dot::DotHandle>,
+    pointer: Option<pointer::PointerHandle>,
     last_clipboard: Mutex<Option<String>>,
     dbus: Mutex<Option<zbus::Connection>>,
 }
@@ -210,6 +229,16 @@ impl Daemon {
                 let mut v = d.to_json(&self.identity.spki_der);
                 if let Some(players) = inner.phone_players.get(&d.id) {
                     let mut list: Vec<Value> = players.values().cloned().collect();
+                    if let Some(art) = inner.phone_art.get(&d.id) {
+                        for p in list.iter_mut() {
+                            if let Some(path) = p["player"]
+                                .as_str()
+                                .and_then(|name| art.get(name))
+                            {
+                                p["albumArtPath"] = json!(path);
+                            }
+                        }
+                    }
                     list.sort_by_key(|p| {
                         p["player"].as_str().unwrap_or("").to_string()
                     });
@@ -466,6 +495,19 @@ impl Daemon {
                     self.handle_presenter(&packet.body).await;
                 }
             }
+            "kdeconnect.mousepad.request" => {
+                let paired = {
+                    let inner = self.inner.lock().await;
+                    inner
+                        .devices
+                        .get(device_id)
+                        .map(|d| d.paired)
+                        .unwrap_or(false)
+                };
+                if paired {
+                    self.handle_mousepad(&packet.body).await;
+                }
+            }
             "kdeconnect.sftp" => {
                 let paired = {
                     let inner = self.inner.lock().await;
@@ -526,7 +568,39 @@ impl Daemon {
                         .unwrap_or(false)
                 };
                 if paired {
-                    self.store_phone_player(device_id, &packet.body).await;
+                    self.store_phone_player(device_id, &packet).await;
+                }
+            }
+            "kdeconnect.runcommand.request" => {
+                let paired = self
+                    .inner
+                    .lock()
+                    .await
+                    .devices
+                    .get(device_id)
+                    .map(|d| d.paired)
+                    .unwrap_or(false);
+                if !paired {
+                    return;
+                }
+                if packet
+                    .body
+                    .get("requestCommandList")
+                    .and_then(|v| v.as_bool())
+                    == Some(true)
+                {
+                    self.send_command_list(&device_id).await;
+                } else if let Some(key) = packet.body.get("key").and_then(|v| v.as_str()) {
+                    let key = key.to_string();
+                    self.run_remote_command(&device_id, &key).await;
+                } else if packet.body.get("setup").and_then(|v| v.as_bool()) == Some(true) {
+                    // The phone asked to edit the command list: open our app.
+                    if let Ok(exe) = std::env::current_exe() {
+                        let _ = std::process::Command::new(exe.with_file_name("hyprconnect-app"))
+                            .spawn();
+                    }
+                } else if packet.body.get("stop").and_then(|v| v.as_bool()) == Some(true) {
+                    self.stop_remote_commands().await;
                 }
             }
             "kdeconnect.battery" => {
@@ -2387,6 +2461,7 @@ impl Daemon {
             .await;
             self.send_sink_list(&device_id).await;
             self.request_sftp(&device_id).await;
+            self.send_command_list(&device_id).await;
             self.send_packet(
                 &device_id,
                 Packet::new("kdeconnect.battery.request", json!({ "request": true })),
@@ -2903,6 +2978,106 @@ async fn control_task(daemon: Arc<Daemon>, path: PathBuf) {
                     }
                     _ => Err(anyhow::anyhow!("player and volume required")),
                 },
+                "phone_seek" => match (req["player"].as_str(), req["position"].as_i64()) {
+                    (Some(player), Some(position)) => {
+                        let sent = daemon
+                            .send_packet(
+                                device_id,
+                                Packet::new(
+                                    "kdeconnect.mpris.request",
+                                    json!({ "player": player, "SetPosition": position * 1000 }),
+                                ),
+                            )
+                            .await;
+                        Ok(json!({"ok": sent}))
+                    }
+                    _ => Err(anyhow::anyhow!("player and position required")),
+                },
+                "mousepad" => {
+                    // Desktop -> phone remote input: forward the body as a
+                    // mousepad packet to the phone.
+                    let body = req.get("body").cloned().unwrap_or_else(|| json!({}));
+                    let sent = daemon
+                        .send_packet(
+                            device_id,
+                            Packet::new("kdeconnect.mousepad.request", body),
+                        )
+                        .await;
+                    Ok(json!({"ok": sent}))
+                }
+                "send_clipboard" => {
+                    let content = daemon
+                        .clipboard
+                        .as_ref()
+                        .and_then(|h| h.current.lock().unwrap().clone());
+                    match content {
+                        Some(c) => {
+                            *daemon.last_clipboard.lock().await = Some(c.clone());
+                            let sent = daemon
+                                .send_packet(
+                                    device_id,
+                                    Packet::new(
+                                        "kdeconnect.clipboard",
+                                        json!({ "content": c }),
+                                    ),
+                                )
+                                .await;
+                            Ok(json!({"ok": sent}))
+                        }
+                        None => Ok(json!({"ok": false})),
+                    }
+                }
+                "run_command" => match req["key"].as_str() {
+                    Some(key) => {
+                        // No requesting device: output packets go nowhere,
+                        // the command simply runs on this desktop.
+                        daemon.run_remote_command("", key).await;
+                        Ok(json!({"ok": true}))
+                    }
+                    None => Err(anyhow::anyhow!("key required")),
+                },
+                "get_commands" => Ok(json!({
+                    "ok": true,
+                    "commands": Value::Object(daemon.inner.lock().await.commands.clone()),
+                })),
+                "set_commands" => {
+                    let mut resp = json!({"ok": true});
+                    match req.get("commands").and_then(|v| v.as_object()) {
+                        Some(map) => {
+                            let mut clean = serde_json::Map::new();
+                            for (k, v) in map.iter().take(64) {
+                                let name =
+                                    v.get("name").and_then(|x| x.as_str()).unwrap_or("");
+                                let command =
+                                    v.get("command").and_then(|x| x.as_str()).unwrap_or("");
+                                if !name.trim().is_empty() {
+                                    clean.insert(
+                                        k.clone(),
+                                        json!({"name": name, "command": command}),
+                                    );
+                                }
+                            }
+                            daemon.inner.lock().await.commands = clean.clone();
+                            save_commands(&daemon.state, &clean);
+                            let targets: Vec<String> = {
+                                let inner = daemon.inner.lock().await;
+                                inner
+                                    .devices
+                                    .values()
+                                    .filter(|d| d.paired && d.connected)
+                                    .map(|d| d.id.clone())
+                                    .collect()
+                            };
+                            for id in targets {
+                                daemon.send_command_list(&id).await;
+                            }
+                        }
+                        None => {
+                            resp = json!({"ok": false, "error": "commands must be an object"});
+                        }
+                    }
+                    Ok(resp)
+                }
                 "settings" => {
                     let monitor = {
                         let inner = daemon.inner.lock().await;
@@ -3056,10 +3231,18 @@ async fn run_daemon() -> Result<()> {
             sftp_mounts: HashMap::new(),
             presenter_monitor: load_presenter_monitor(&dir),
             phone_players: HashMap::new(),
+            phone_art: HashMap::new(),
+            phone_art_wanted: HashMap::new(),
             plugins_disabled: load_plugins_disabled(&dir),
+            commands: load_commands(&dir),
+            running_cmds: std::collections::HashMap::new(),
+            next_cmd_id: 1,
             presenter: PresenterState::default(),
+            mousepad_acc: (0.0, 0.0),
         }),
         clipboard: clipboard_handle,
+        dot: dot::spawn(|msg| log(msg)),
+        pointer: pointer::spawn(|msg| log(msg)),
         last_clipboard: Mutex::new(None),
         dbus: Mutex::new(None),
     });
@@ -3086,6 +3269,7 @@ async fn run_daemon() -> Result<()> {
     tokio::spawn(daemon.clone().mpris_bridge_loop());
     tokio::spawn(daemon.clone().sink_watch_loop());
     tokio::spawn(daemon.clone().presenter_pointer_loop());
+    tokio::spawn(daemon.clone().mousepad_flush_loop());
     {
         let d = daemon.clone();
         tokio::spawn(async move {
@@ -3152,6 +3336,7 @@ async fn main() -> Result<()> {
     match cmd {
         "run" => run_daemon().await,
         "devices" => cli_command(json!({"cmd": "devices"})).await,
+        "commands" => cli_command(json!({"cmd": "get_commands"})).await,
         "monitor" => cli_monitor().await,
         "pair" | "accept" | "reject" | "unpair" | "mount" | "unmount" | "ring" => {
             let device = args.get(1).context("device id required")?;
@@ -3412,7 +3597,65 @@ impl Daemon {
     /// Merge one kdeconnect.mpris packet from the phone into the
     /// stored per-player state, and ask for now-playing details of
     /// players we only know by name so far.
-    async fn store_phone_player(self: &Arc<Self>, device_id: &str, body: &Value) {
+    async fn store_phone_player(self: &Arc<Self>, device_id: &str, packet: &Packet) {
+        let body = &packet.body;
+        // Album art answer: the phone replies to a pull request with
+        // transferringAlbumArt and the image as the packet payload.
+        if body["transferringAlbumArt"].as_bool() == Some(true) {
+            if let (Some(info), Some(size)) =
+                (&packet.payload_transfer_info, packet.payload_size)
+            {
+                if size > 0 && size <= 8_000_000 {
+                    if let Some(port) = info.get("port").and_then(|p| p.as_u64()) {
+                        match self
+                            .download_payload(device_id, port as u16, size as usize)
+                            .await
+                        {
+                            Ok(bytes) => {
+                                let player =
+                                    body["player"].as_str().unwrap_or("player").to_string();
+                                let safe: String = player
+                                    .chars()
+                                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
+                                    .collect();
+                                let ext = if bytes.starts_with(&[0xFF, 0xD8]) {
+                                    "jpg"
+                                } else if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+                                    "png"
+                                } else if bytes.starts_with(b"RIFF") {
+                                    "webp"
+                                } else {
+                                    "bin"
+                                };
+                                let dir = self.state.join("art");
+                                let _ = tokio::fs::create_dir_all(&dir).await;
+                                let path =
+                                    dir.join(format!("{}-{}.{}", device_id, safe, ext));
+                                if tokio::fs::write(&path, &bytes).await.is_ok() {
+                                    let mut inner = self.inner.lock().await;
+                                    inner
+                                        .phone_art
+                                        .entry(device_id.to_string())
+                                        .or_default()
+                                        .insert(
+                                            player.clone(),
+                                            path.to_string_lossy().to_string(),
+                                        );
+                                    log(&format!(
+                                        "phone album art for {} saved ({} bytes)",
+                                        player,
+                                        bytes.len()
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                log(&format!("phone album art download failed: {:#}", e))
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let mut want_details: Vec<String> = Vec::new();
         {
             let mut inner = self.inner.lock().await;
@@ -3460,7 +3703,62 @@ impl Daemon {
             )
             .await;
         }
+        // Album art is a pull protocol: when the now-playing state
+        // names an art URL we have not fetched yet, ask for it.
+        let want_art: Option<(String, String)> = {
+            let mut inner = self.inner.lock().await;
+            let mut out = None;
+            if let Some(player) = body["player"].as_str() {
+                if let Some(entry) = inner
+                    .phone_players
+                    .get(device_id)
+                    .and_then(|ps| ps.get(player))
+                {
+                    let url = entry["albumArtUrl"].as_str().unwrap_or("").to_string();
+                    // The phone does not advertise a support flag for
+                    // its own players; it answers art pulls for the
+                    // URL it published, so just ask.
+                    if !url.is_empty() {
+                        let wanted = inner
+                            .phone_art_wanted
+                            .entry(device_id.to_string())
+                            .or_default();
+                        if wanted.get(player).map(|u| u.as_str()) != Some(url.as_str()) {
+                            wanted.insert(player.to_string(), url.clone());
+                            out = Some((player.to_string(), url));
+                        }
+                    }
+                }
+            }
+            out
+        };
+        if let Some((player, url)) = want_art {
+            self.send_packet(
+                device_id,
+                Packet::new(
+                    "kdeconnect.mpris.request",
+                    json!({ "player": player, "albumArtUrl": url }),
+                ),
+            )
+            .await;
+        }
     }
+}
+
+fn load_commands(dir: &std::path::Path) -> serde_json::Map<String, Value> {
+    let Ok(text) = std::fs::read_to_string(dir.join("commands.json")) else {
+        return serde_json::Map::new();
+    };
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn save_commands(dir: &std::path::Path, commands: &serde_json::Map<String, Value>) {
+    let text =
+        serde_json::to_string_pretty(&Value::Object(commands.clone())).unwrap_or_default();
+    let _ = std::fs::write(dir.join("commands.json"), text);
 }
 
 fn load_plugins_disabled(dir: &std::path::Path) -> std::collections::HashSet<String> {
@@ -3491,6 +3789,185 @@ fn save_plugins_disabled(dir: &std::path::Path, disabled: &std::collections::Has
 impl Daemon {
     /// Fire a plugin's connect-time requests at one device, used
     /// when the plugin is switched back on while devices are live.
+    /// Send this device our run-command list. Upstream sends it on connect,
+    /// when the phone asks, and whenever the list changes. The list travels
+    /// as a JSON string: an object of key -> {name, command}.
+    async fn send_command_list(self: &Arc<Self>, device_id: &str) {
+        let list = {
+            let cmds = self.inner.lock().await.commands.clone();
+            serde_json::to_string(&Value::Object(cmds)).unwrap_or_else(|_| "{}".into())
+        };
+        self.send_packet(
+            device_id,
+            Packet::new(
+                "kdeconnect.runcommand",
+                json!({ "commandList": list, "canAddCommand": true }),
+            ),
+        )
+        .await;
+    }
+
+    /// Execute one predefined command for a paired phone and stream its
+    /// output back, upstream-style: commandStarted, batched commandOutput
+    /// line packets, then commandFinished with the exit code.
+    async fn run_remote_command(self: &Arc<Self>, device_id: &str, key: &str) {
+        let entry = self.inner.lock().await.commands.get(key).cloned();
+        let Some(entry) = entry else {
+            log(&format!("runcommand: unknown key {key} from {device_id}"));
+            return;
+        };
+        let command = entry
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if command.trim().is_empty() {
+            return;
+        }
+        let id = {
+            let mut inner = self.inner.lock().await;
+            let id = inner.next_cmd_id;
+            inner.next_cmd_id = inner.next_cmd_id.wrapping_add(1).max(1);
+            id
+        };
+        let mut cmd = tokio::process::Command::new("/bin/sh");
+        cmd.arg("-c")
+            .arg(&command)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .current_dir(std::env::var("HOME").unwrap_or_else(|_| "/".into()));
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                log(&format!("runcommand: spawn failed: {e}"));
+                return;
+            }
+        };
+        if let Some(pid) = child.id() {
+            self.inner.lock().await.running_cmds.insert(id, pid);
+        }
+        self.send_packet(
+            device_id,
+            Packet::new(
+                "kdeconnect.runcommand.output",
+                json!({ "commandStarted": true, "id": id, "command": command }),
+            ),
+        )
+        .await;
+        let stdout: std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>> =
+            Box::pin(child.stdout.take().unwrap());
+        let stderr: std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>> =
+            Box::pin(child.stderr.take().unwrap());
+        let daemon = self.clone();
+        let dev = device_id.to_string();
+        tokio::spawn(async move {
+            let (tx, mut rx) = mpsc::channel::<(bool, String)>(64);
+            for (is_err, stream) in [(false, stdout), (true, stderr)] {
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let mut lines = BufReader::new(stream).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        if tx.send((is_err, line)).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(tx);
+            let mut out_lines: Vec<String> = Vec::new();
+            let mut err_lines: Vec<String> = Vec::new();
+            loop {
+                let flush = tokio::select! {
+                    msg = rx.recv() => match msg {
+                        Some((is_err, line)) => {
+                            if is_err {
+                                err_lines.push(line);
+                            } else {
+                                out_lines.push(line);
+                            }
+                            out_lines.len() >= 5 || err_lines.len() >= 5
+                        }
+                        None => break,
+                    },
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                        !out_lines.is_empty() || !err_lines.is_empty()
+                    }
+                };
+                if flush && (!out_lines.is_empty() || !err_lines.is_empty()) {
+                    daemon
+                        .send_packet(
+                            &dev,
+                            Packet::new(
+                                "kdeconnect.runcommand.output",
+                                json!({
+                                    "commandOutput": true,
+                                    "stdout": std::mem::take(&mut out_lines),
+                                    "stderr": std::mem::take(&mut err_lines),
+                                    "id": id,
+                                }),
+                            ),
+                        )
+                        .await;
+                }
+            }
+            if !out_lines.is_empty() || !err_lines.is_empty() {
+                daemon
+                    .send_packet(
+                        &dev,
+                        Packet::new(
+                            "kdeconnect.runcommand.output",
+                            json!({
+                                "commandOutput": true,
+                                "stdout": out_lines,
+                                "stderr": err_lines,
+                                "id": id,
+                            }),
+                        ),
+                    )
+                    .await;
+            }
+            let (success, code) = match child.wait().await {
+                Ok(st) => (st.success(), st.code().unwrap_or(1)),
+                Err(_) => (false, 1),
+            };
+            daemon.inner.lock().await.running_cmds.remove(&id);
+            daemon
+                .send_packet(
+                    &dev,
+                    Packet::new(
+                        "kdeconnect.runcommand.output",
+                        json!({
+                            "commandFinished": true,
+                            "success": success,
+                            "exitCode": code,
+                            "id": id,
+                        }),
+                    ),
+                )
+                .await;
+        });
+    }
+
+    /// Terminate every command a phone started (the phone's stop button).
+    async fn stop_remote_commands(self: &Arc<Self>) {
+        let pids: Vec<u32> = self
+            .inner
+            .lock()
+            .await
+            .running_cmds
+            .values()
+            .copied()
+            .collect();
+        for pid in pids {
+            if pid > 0 {
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+            }
+        }
+    }
+
     async fn plugin_kick(self: &Arc<Self>, device_id: &str, plugin: &str) {
         match plugin {
             "notification" => {
@@ -3512,6 +3989,9 @@ impl Daemon {
                     ),
                 )
                 .await;
+            }
+            "runcommand" => {
+                self.send_command_list(device_id).await;
             }
             "mpris" => {
                 self.mpris_send_all_to(device_id).await;
@@ -3618,18 +4098,18 @@ impl Daemon {
     }
 }
 
-/// Pixels of cursor travel per unit of presenter delta.
-const PRESENTER_SENS: f64 = 1200.0;
-
 #[derive(Default)]
 struct PresenterState {
     acc_x: f64,
     acc_y: f64,
     session: bool,
-    pos_x: f64,
-    pos_y: f64,
-    /// x, y, logical width, logical height of the session monitor.
-    rect: (i64, i64, i64, i64),
+    /// Dot position as fractions of the session monitor. The
+    /// reference presenter accumulates the phone's raw gyro deltas
+    /// exactly this way (y scaled by the screen ratio).
+    fx: f64,
+    fy: f64,
+    /// Width over height of the session monitor.
+    ratio: f64,
     last_packet: Option<std::time::Instant>,
 }
 
@@ -3702,7 +4182,249 @@ async fn send_key(code: u32) {
         .await;
 }
 
+
+async fn ydotool_keys(args: &[String]) {
+    let runtime = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| format!("/run/user/{}", unsafe { libc::getuid() }));
+    let mut full: Vec<&str> = vec!["key"];
+    full.extend(args.iter().map(|a| a.as_str()));
+    let _ = tokio::process::Command::new("ydotool")
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .args(&full)
+        .output()
+        .await;
+}
+
+/// Presses a key while holding modifier keycodes (and Shift when
+/// the character needs it).
+async fn send_key_combo(mods: &[u32], code: u32, shift: bool) {
+    let mut held: Vec<u32> = mods.to_vec();
+    if shift && !held.contains(&42) {
+        held.push(42); // KEY_LEFTSHIFT
+    }
+    let mut args: Vec<String> =
+        held.iter().map(|c| format!("{}:1", c)).collect();
+    args.push(format!("{}:1", code));
+    args.push(format!("{}:0", code));
+    for c in held.iter().rev() {
+        args.push(format!("{}:0", c));
+    }
+    ydotool_keys(&args).await;
+}
+
+/// Evdev keycodes for the mousepad protocol's specialKey table,
+/// mirroring the reference desktop implementation (index 0 is
+/// invalid; F1 to F12 occupy 21 to 32).
+fn special_key_evdev(special: i64) -> Option<u32> {
+    Some(match special {
+        1 => 14,   // BACKSPACE
+        2 => 15,   // TAB
+        3 => 28,   // LINEFEED acts as ENTER
+        4 => 105,  // LEFT
+        5 => 103,  // UP
+        6 => 106,  // RIGHT
+        7 => 108,  // DOWN
+        8 => 104,  // PAGEUP
+        9 => 109,  // PAGEDOWN
+        10 => 102, // HOME
+        11 => 107, // END
+        12 => 28,  // ENTER
+        13 => 111, // DELETE
+        14 => 1,   // ESC
+        15 => 99,  // SYSRQ
+        16 => 70,  // SCROLLLOCK
+        17 => 29,  // LEFTCTRL
+        18 => 56,  // LEFTALT
+        19 => 42,  // LEFTSHIFT
+        20 => 125, // LEFTMETA
+        21..=32 => {
+            [59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88]
+                [(special - 21) as usize]
+        }
+        _ => return None,
+    })
+}
+
+/// Evdev keycode and Shift need for a printable character on a US
+/// layout, which is what ydotool assumes as well.
+fn char_key(c: char) -> Option<(u32, bool)> {
+    Some(match c {
+        'a'..='z' => (
+            match c {
+                'a' => 30, 'b' => 48, 'c' => 46, 'd' => 32, 'e' => 18,
+                'f' => 33, 'g' => 34, 'h' => 35, 'i' => 23, 'j' => 36,
+                'k' => 37, 'l' => 38, 'm' => 50, 'n' => 49, 'o' => 24,
+                'p' => 25, 'q' => 16, 'r' => 19, 's' => 31, 't' => 20,
+                'u' => 22, 'v' => 47, 'w' => 17, 'x' => 45, 'y' => 21,
+                _ => 44, // z
+            },
+            false,
+        ),
+        'A'..='Z' => (char_key(c.to_ascii_lowercase())?.0, true),
+        '1'..='9' => (c as u32 - '1' as u32 + 2, false),
+        '0' => (11, false),
+        '!' => (2, true),
+        '@' => (3, true),
+        '#' => (4, true),
+        '$' => (5, true),
+        '%' => (6, true),
+        '^' => (7, true),
+        '&' => (8, true),
+        '*' => (9, true),
+        '(' => (10, true),
+        ')' => (11, true),
+        '-' => (12, false),
+        '_' => (12, true),
+        '=' => (21, false),
+        '+' => (21, true),
+        ' ' => (57, false),
+        '.' => (52, false),
+        ',' => (51, false),
+        '/' => (53, false),
+        '?' => (53, true),
+        ';' => (39, false),
+        ':' => (39, true),
+        '\'' => (40, false),
+        '"' => (40, true),
+        '[' => (26, false),
+        ']' => (27, false),
+        '\\' => (43, false),
+        '`' => (41, false),
+        '~' => (41, true),
+        _ => return None,
+    })
+}
+
 impl Daemon {
+    /// kdeconnect.mousepad.request, the remote input plugin.
+    /// The phone's presentation remote also sends its slide
+    /// controls through this packet type (next is specialKey 9,
+    /// PageDown; previous is 8, PageUp; fullscreen 25, F5; exit
+    /// 14, Esc; zoom is a ctrl-modified "+" or "-" key packet),
+    /// with modifier booleans riding along ("super" is what the
+    /// phone calls the meta modifier). Pointer motion, buttons
+    /// and scroll go to the daemon's virtual pointer; keys keep
+    /// using ydotool, since they arrive at typing speed.
+    async fn handle_mousepad(self: &Arc<Self>, body: &Value) {
+        let b = |k: &str| body[k].as_bool() == Some(true);
+        if let Some(ptr) = &self.pointer {
+            // Button codes are evdev: 272 left, 273 right, 274 middle.
+            if b("singleclick") {
+                ptr.click(272);
+                return;
+            }
+            if b("doubleclick") {
+                ptr.click(272);
+                ptr.click(272);
+                return;
+            }
+            if b("middleclick") {
+                ptr.click(274);
+                return;
+            }
+            if b("rightclick") {
+                ptr.click(273);
+                return;
+            }
+            if b("singlehold") {
+                ptr.button(272, true);
+                return;
+            }
+            if b("singlerelease") {
+                ptr.button(272, false);
+                return;
+            }
+            if b("scroll") {
+                ptr.axis(
+                    body["dx"].as_f64().unwrap_or(0.0),
+                    body["dy"].as_f64().unwrap_or(0.0),
+                );
+                return;
+            }
+        }
+        let mut mods: Vec<u32> = Vec::new();
+        if b("ctrl") {
+            mods.push(29);
+        }
+        if b("alt") {
+            mods.push(56);
+        }
+        if b("super") || b("meta") {
+            mods.push(125);
+        }
+        let shift = b("shift");
+        if let Some(sk) = body["specialKey"].as_i64() {
+            match special_key_evdev(sk) {
+                Some(code) => {
+                    if mods.is_empty() && !shift {
+                        send_key(code).await;
+                    } else {
+                        send_key_combo(&mods, code, shift).await;
+                    }
+                }
+                None => {
+                    log(&format!("mousepad specialKey {} (unknown)", sk));
+                }
+            }
+            return;
+        }
+        if let Some(key) = body["key"].as_str() {
+            let mut chars = key.chars();
+            if let (Some(c), None) = (chars.next(), chars.next()) {
+                if let Some((code, needs_shift)) = char_key(c) {
+                    send_key_combo(&mods, code, shift || needs_shift).await;
+                    return;
+                }
+            }
+            if mods.is_empty() && !key.is_empty() {
+                let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+                    format!("/run/user/{}", unsafe { libc::getuid() })
+                });
+                let _ = tokio::process::Command::new("ydotool")
+                    .env("XDG_RUNTIME_DIR", &runtime)
+                    .args(["type", key])
+                    .output()
+                    .await;
+            }
+            return;
+        }
+        let (dx, dy) = (
+            body["dx"].as_f64().unwrap_or(0.0),
+            body["dy"].as_f64().unwrap_or(0.0),
+        );
+        if dx != 0.0 || dy != 0.0 {
+            let mut inner = self.inner.lock().await;
+            inner.mousepad_acc.0 += dx;
+            inner.mousepad_acc.1 += dy;
+            return;
+        }
+        if body.get("x").is_some() || body.get("y").is_some() {
+            static ONCE: std::sync::Once = std::sync::Once::new();
+            ONCE.call_once(|| {
+                log("mousepad absolute motion packets are not supported");
+            });
+        }
+    }
+
+    /// Flushes accumulated touchpad deltas to the virtual pointer
+    /// at ~120 Hz so a burst of packets becomes smooth motion.
+    async fn mousepad_flush_loop(self: Arc<Self>) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(8)).await;
+            let step = {
+                let mut inner = self.inner.lock().await;
+                let acc = inner.mousepad_acc;
+                inner.mousepad_acc = (0.0, 0.0);
+                acc
+            };
+            if step != (0.0, 0.0) {
+                if let Some(ptr) = &self.pointer {
+                    ptr.move_by(step.0, step.1);
+                }
+            }
+        }
+    }
+
     async fn handle_presenter(self: &Arc<Self>, body: &Value) {
         if body["stop"].as_bool() == Some(true) {
             let mut inner = self.inner.lock().await;
@@ -3710,18 +4432,12 @@ impl Daemon {
                 inner.presenter.session = false;
                 inner.presenter.acc_x = 0.0;
                 inner.presenter.acc_y = 0.0;
+                drop(inner);
+                if let Some(dot) = &self.dot {
+                    dot.hide();
+                }
                 log("presenter session stopped");
             }
-            return;
-        }
-        if body["next"].as_bool() == Some(true) {
-            log("presenter: next slide");
-            send_key(106).await; // KEY_RIGHT
-            return;
-        }
-        if body["previous"].as_bool() == Some(true) {
-            log("presenter: previous slide");
-            send_key(105).await; // KEY_LEFT
             return;
         }
         let (Some(dx), Some(dy)) = (body["dx"].as_f64(), body["dy"].as_f64())
@@ -3760,41 +4476,43 @@ impl Daemon {
             .or_else(|| monitors.iter().find(|m| !m.name.starts_with("eDP")))
             .or_else(|| monitors.iter().find(|m| m.focused))
             .unwrap_or(&monitors[0]);
-        let (cx, cy) = (pick.x + pick.w / 2, pick.y + pick.h / 2);
         {
             let mut inner = self.inner.lock().await;
             let p = &mut inner.presenter;
             p.session = true;
-            p.pos_x = cx as f64;
-            p.pos_y = cy as f64;
-            p.rect = (pick.x, pick.y, pick.w, pick.h);
+            p.fx = 0.5;
+            p.fy = 0.5;
+            p.ratio = if pick.h > 0 {
+                pick.w as f64 / pick.h as f64
+            } else {
+                1.0
+            };
         }
-        hypr_dispatch(&format!(
-            "hl.dsp.cursor.move({{ x = {}, y = {} }})",
-            cx, cy
-        ))
-        .await;
+        if let Some(dot) = &self.dot {
+            dot.show(&pick.name);
+            dot.move_to(0.5, 0.5);
+        }
         log(&format!("presenter session started on {}", pick.name));
     }
 
     /// Applies accumulated pointer deltas at ~50 Hz so a burst of
-    /// gyro packets becomes one cursor move, clamped to the
-    /// session monitor.
+    /// gyro packets becomes one smooth dot move.
     async fn presenter_pointer_loop(self: Arc<Self>) {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let mut timed_out = false;
             let step = {
                 let mut inner = self.inner.lock().await;
                 let p = &mut inner.presenter;
                 if p.session
                     && p.last_packet
-                        .map(|t| t.elapsed() > std::time::Duration::from_secs(10))
+                        .map(|t| t.elapsed() > std::time::Duration::from_secs(3))
                         .unwrap_or(false)
                 {
                     p.session = false;
                     p.acc_x = 0.0;
                     p.acc_y = 0.0;
-                    log("presenter session timed out");
+                    timed_out = true;
                 }
                 if !p.session || (p.acc_x == 0.0 && p.acc_y == 0.0) {
                     None
@@ -3802,20 +4520,21 @@ impl Daemon {
                     let (dx, dy) = (p.acc_x, p.acc_y);
                     p.acc_x = 0.0;
                     p.acc_y = 0.0;
-                    let (rx, ry, rw, rh) = p.rect;
-                    p.pos_x = (p.pos_x + dx * PRESENTER_SENS)
-                        .clamp(rx as f64, (rx + rw - 1) as f64);
-                    p.pos_y = (p.pos_y + dy * PRESENTER_SENS)
-                        .clamp(ry as f64, (ry + rh - 1) as f64);
-                    Some((p.pos_x.round() as i64, p.pos_y.round() as i64))
+                    p.fx = (p.fx + dx).clamp(0.0, 1.0);
+                    p.fy = (p.fy + dy * p.ratio).clamp(0.0, 1.0);
+                    Some((p.fx, p.fy))
                 }
             };
-            if let Some((x, y)) = step {
-                hypr_dispatch(&format!(
-                    "hl.dsp.cursor.move({{ x = {}, y = {} }})",
-                    x, y
-                ))
-                .await;
+            if timed_out {
+                if let Some(dot) = &self.dot {
+                    dot.hide();
+                }
+                log("presenter session timed out");
+            }
+            if let Some((fx, fy)) = step {
+                if let Some(dot) = &self.dot {
+                    dot.move_to(fx, fy);
+                }
             }
         }
     }

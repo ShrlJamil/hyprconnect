@@ -309,3 +309,21 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
   Capabilities.incoming kini menerima kdeconnect.presenter, ubin
   Presentation remote membuka halaman sungguhan. Dependensi baru:
   sensors_plus ^7.1.1 (pub.dev publik).
+
+## Addendum 2026-11-22 16:10 — tap-to-pair from the phone
+Atas komplain Sahrul (pairing pertama versi M0 menyuruh menjalankan
+CLI di desktop): pairing pertama sekarang cukup satu tap di HP.
+- Daemon: maybe_connect tidak lagi mensyaratkan perangkat trusted;
+  daemon menghubungi balik perangkat unpaired yang terdengar di
+  discovery (perilaku setara kdeconnectd; semua fitur tetap tergerbang
+  status paired, pairing tetap harus diterima eksplisit di desktop).
+- App: connectTo untuk desktop yang belum dikenal menunggu kanal
+  masuk dari desktop (maks 25 dtk) alih-alih memunculkan dialog CLI;
+  tombol Hubungkan langsung mengirim permintaan pairing begitu kanal
+  terbuka; kartu baru menampilkan kunci verifikasi selama menunggu
+  diterima, dengan tombol batal. Dialog "Pairing pertama" dihapus.
+- Alasan teknis tetap: TLS server Dart menolak sertifikat klien yang
+  belum dikenal, jadi arah TCP untuk pairing pertama dibalik, tapi
+  sekarang tidak terasa oleh pengguna.
+- Tes 105 lolos + 1 skip, analyze bersih. APK release arm64 terkirim
+  ke POCO X5 lewat daemon 16:09. Vonis fisik menunggu Sahrul mencoba.

@@ -49,10 +49,6 @@ enum ConnectOutcome {
   /// The encrypted channel is up.
   connected,
 
-  /// The desktop is not in the trust store yet. First pairing must
-  /// start from the desktop (see connection.dart); the UI explains this.
-  needsDesktopPair,
-
   /// The connection attempt failed; details are in the log.
   failed,
 }
@@ -564,8 +560,10 @@ class AppState extends ChangeNotifier {
     if (_log.length > 100) _log.removeRange(0, _log.length - 100);
   }
 
-  /// Open a connection to a discovered device. The peer certificate
-  /// must already be known (see ConnectOutcome.needsDesktopPair).
+  /// Open a connection to a discovered device. With a known
+  /// certificate the app opens the channel itself; for a first pairing
+  /// it announces itself on discovery and waits for the desktop to
+  /// connect back (see connection.dart for why).
   Future<ConnectOutcome> connectTo(DeviceListEntry entry) async {
     final identity = _identity;
     final trust = _trust;
@@ -577,7 +575,34 @@ class AppState extends ChangeNotifier {
     final tcpPort = entry.tcpPort;
     if (address == null || tcpPort == null) return ConnectOutcome.failed;
     final knownCert = trust.storedCert(entry.deviceId);
-    if (knownCert == null) return ConnectOutcome.needsDesktopPair;
+    if (knownCert == null) {
+      // First contact with this desktop. This app cannot open the
+      // channel itself: as the TCP opener it would be the TLS server,
+      // and a Dart TLS server only accepts a client certificate it
+      // already trusts (see connection.dart). The desktop connects
+      // back to unpaired devices it hears on discovery, so announce
+      // ourselves and wait for its incoming channel.
+      final existing = _connections[entry.deviceId];
+      if (existing != null && existing.isConnected) {
+        return ConnectOutcome.connected;
+      }
+      _logLine(
+        'Menunggu ${entry.name} menghubungi balik untuk pairing pertama',
+      );
+      _discovery?.broadcastIdentity();
+      final deadline = DateTime.now().add(const Duration(seconds: 25));
+      while (DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        final conn = _connections[entry.deviceId];
+        if (conn != null && conn.isConnected) {
+          _logLine('Kanal masuk dari ${entry.name} terbuka');
+          return ConnectOutcome.connected;
+        }
+      }
+      _logLine('${entry.name} tidak menghubungi balik dalam 25 detik');
+      notifyListeners();
+      return ConnectOutcome.failed;
+    }
     try {
       final conn = DeviceConnection(
         identity: identity,
@@ -853,11 +878,7 @@ class AppState extends ChangeNotifier {
   /// M5: move the presenter dot by a relative delta (fractions of
   /// the session monitor). High-frequency traffic: successes stay
   /// silent, failures are logged.
-  Future<void> sendPresenterMove(
-    String deviceId,
-    double dx,
-    double dy,
-  ) async {
+  Future<void> sendPresenterMove(String deviceId, double dx, double dy) async {
     final conn = _connections[deviceId];
     if (conn == null) return;
     try {

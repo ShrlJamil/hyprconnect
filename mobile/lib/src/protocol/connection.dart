@@ -13,10 +13,13 @@
 //! server only accepts a client certificate that is in its trusted
 //! certificates. So the opener role needs the peer certificate up
 //! front, from the trust store or from an earlier incoming connection.
-//! First pairing with a never-seen desktop therefore starts from the
-//! desktop (it connects to the phone, the phone is the TLS client and
-//! accepts any certificate); after that the phone knows the desktop
-//! certificate and can open connections itself.
+//! First pairing with a never-seen desktop therefore rides on the
+//! desktop connecting to the phone: the daemon links back to unpaired
+//! devices it hears on discovery, the phone is the TLS client on that
+//! channel and accepts any certificate, pairing completes there, and
+//! the stored certificate then lets the phone open connections
+//! itself. The user still starts everything with one tap on the
+//! phone; only the TCP direction is reversed.
 
 import 'dart:async';
 import 'dart:convert';

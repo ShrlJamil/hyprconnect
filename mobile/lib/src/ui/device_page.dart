@@ -67,28 +67,18 @@ class _DevicePageState extends State<DevicePage> {
   Future<void> _connect() async {
     final outcome = await _appState.connectTo(_entry);
     if (!mounted) return;
-    if (outcome == ConnectOutcome.needsDesktopPair) {
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Pairing pertama'),
-          content: Text(
-            'Perangkat ini belum dikenal. Pairing pertama harus dimulai '
-            'dari desktop, jalankan di sana:\n\n'
-            'hyprconnect pair ${_entry.deviceId}\n\n'
-            'Setelah desktop meminta pairing, kunci verifikasi muncul di '
-            'sini dan kamu bisa menekan Terima.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    } else if (outcome == ConnectOutcome.failed) {
+    if (outcome == ConnectOutcome.failed) {
       _snack('Gagal terhubung. Cek log di halaman utama.');
+      return;
+    }
+    // One tap does the whole first pairing: with the channel up, ask
+    // for pairing right away. The desktop then shows its accept
+    // prompt with the same verification key this page displays.
+    final conn = _appState.connectionFor(_entry.deviceId);
+    if (conn != null &&
+        !conn.isPaired &&
+        conn.pairState == PairState.unpaired) {
+      await _appState.requestPair(_entry.deviceId);
     }
   }
 
@@ -219,6 +209,7 @@ class _DevicePageState extends State<DevicePage> {
         final conn = _appState.connectionFor(_entry.deviceId);
         final paired = conn?.isPaired ?? false;
         final pendingIn = conn?.pairState == PairState.pendingIn;
+        final pendingOut = conn?.pairState == PairState.pendingOut;
         final connected = conn != null && conn.isConnected;
         final name = _entry.name.isEmpty ? _entry.deviceId : _entry.name;
         return Scaffold(
@@ -354,7 +345,45 @@ class _DevicePageState extends State<DevicePage> {
                   child: Text(_entry.online ? 'Hubungkan' : 'Perangkat luring'),
                 ),
               ],
-              if (connected && !paired && !pendingIn) ...[
+              if (pendingOut && conn != null) ...[
+                const SizedBox(height: 8),
+                Card(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Menunggu diterima di desktop',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Permintaan pairing sudah terkirim. Cocokkan '
+                          'kunci ini dengan yang tampil di desktop, lalu '
+                          'tekan Terima di sana.',
+                        ),
+                        const SizedBox(height: 12),
+                        Center(
+                          child: SelectableText(
+                            conn.verificationKey ?? '-',
+                            style: Theme.of(context).textTheme.headlineMedium
+                                ?.copyWith(letterSpacing: 4),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                          onPressed: () =>
+                              _appState.rejectPair(_entry.deviceId),
+                          child: const Text('Batalkan permintaan'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (connected && !paired && !pendingIn && !pendingOut) ...[
                 const SizedBox(height: 8),
                 FilledButton(
                   onPressed: () => _appState.requestPair(_entry.deviceId),

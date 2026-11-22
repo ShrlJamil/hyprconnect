@@ -426,3 +426,34 @@ its packet silently never leaves the phone; sends are now
 serialized through a future chain. Proven live in the emulator:
 requestSinks reached the daemon and a slider drag moved the
 laptop's actual volume 16% -> 60% (restored to 16% afterwards).
+
+## Addendum 2026-11-22 (sore): Masukan jarak jauh ala KDE Connect
+
+Atas screenshot referensi Sahrul dari aplikasi KDE Connect Android
+(halaman utama + dua halaman pengaturannya):
+
+- Halaman Masukan jarak jauh ditulis ulang: touchpad memenuhi layar
+  dengan teks petunjuk di tengah; baris tombol tetikus di bawah
+  (kiri/tengah/kanan, kiri bersifat tahan-lepas sungguhan); bar atas
+  berisi keyboard, kirim teks, dan pengaturan.
+- Gestur mengikuti model KDE: 1 jari seret = gerak, 2 jari seret =
+  gulir, ketuk 1/2/3 jari = aksi terkonfigurasi, ketuk ganda lalu
+  seret = drag (klik kiri ditahan 350 ms menunggu ketuk kedua).
+  Perilaku lama yang hilang: tekan lama 400 ms untuk drag dan mode
+  Gerak/Gulir. Tetikus giroskop opsional dari pengaturan.
+- Pengaturan per perangkat (remote_input_prefs.json): aksi ketuk per
+  jumlah jari, kepekaan, akselerasi, gulir terbalik + sensitivitas,
+  giroskop + sensitivitas, tampilkan tombol, drag ketuk ganda. Seksi
+  berbagi penekanan tombol antar-aplikasi dari referensi TIDAK ditiru
+  (aplikasi tidak punya target berbagi itu).
+- Keyboard BUKAN halaman lagi (perintah Sahrul 18:49): tombol
+  keyboard menampilkan keyboard lunak langsung di halaman yang sama;
+  field ketik ramping + chip modifier + baris tombol khusus/panah
+  muncul di atas baris tombol tetikus. keyboard_page.dart dihapus;
+  halaman Kirim teks tetap terpisah.
+- Tes: suite penuh 112 lolos + 1 skip (13 tes halaman ini).
+- Verifikasi emulator ronde ini tersangkut rig: daemon gagal
+  menyambung ulang ke aplikasi emulator (laporan CN tidak cocok)
+  sejak ronde multimedia; probe TLS manual membuktikan aplikasi
+  menyajikan sertifikat yang benar lewat forward yang sama, jadi
+  halaman baru belum terfoto live. Vonis fisik menunggu HP asli.

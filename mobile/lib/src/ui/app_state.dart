@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../protocol/protocol.dart';
 import '../settings/plugin_settings.dart';
+import '../settings/remote_input_prefs.dart';
 
 /// One row of the home device list: a discovered device, a trusted
 /// device that is currently offline, or both.
@@ -57,6 +58,7 @@ class AppState extends ChangeNotifier {
   LocalIdentity? _identity;
   TrustStore? _trust;
   PluginSettings? _pluginSettings;
+  RemoteInputPrefsStore? _remoteInputPrefs;
   TcpListener? _listener;
   Discovery? _discovery;
   final Map<String, DiscoveredDevice> _found = {};
@@ -98,6 +100,21 @@ class AppState extends ChangeNotifier {
   /// the stored ones, so pages never see a null.
   PluginSettings get pluginSettings =>
       _pluginSettings ?? PluginSettings.inMemory();
+
+  RemoteInputPrefsStore get remoteInputPrefsStore =>
+      _remoteInputPrefs ?? RemoteInputPrefsStore.inMemory();
+
+  /// The remote input (mousepad) preferences for one device.
+  RemoteInputPrefs remoteInputPrefsFor(String deviceId) =>
+      remoteInputPrefsStore.forDevice(deviceId);
+
+  Future<void> updateRemoteInputPrefs(
+    String deviceId,
+    RemoteInputPrefs prefs,
+  ) async {
+    await remoteInputPrefsStore.save(deviceId, prefs);
+    notifyListeners();
+  }
 
   String get status => _status;
   List<String> get log => List.unmodifiable(_log);
@@ -228,8 +245,12 @@ class AppState extends ChangeNotifier {
 
   /// Test-only constructor: state with the given plugin settings and
   /// nothing started. Production code uses AppState() + initialize().
-  AppState.test({required PluginSettings settings})
-    : _pluginSettings = settings;
+  AppState.test({
+    required PluginSettings settings,
+    RemoteInputPrefsStore? remoteInputPrefs,
+  }) : _pluginSettings = settings {
+    _remoteInputPrefs = remoteInputPrefs;
+  }
 
   AppState();
 
@@ -244,6 +265,7 @@ class AppState extends ChangeNotifier {
       );
       final trust = await TrustStore.load(appDir);
       final pluginSettings = await PluginSettings.load(appDir);
+      final remoteInputPrefs = await RemoteInputPrefsStore.load(appDir);
       _receiveDir = await _resolveReceiveDir();
       _artDir = Directory('${appDir.path}/album-art');
       await _artDir!.create(recursive: true);
@@ -261,6 +283,7 @@ class AppState extends ChangeNotifier {
       _identity = identity;
       _trust = trust;
       _pluginSettings = pluginSettings;
+      _remoteInputPrefs = remoteInputPrefs;
       _listener = listener;
       _discovery = discovery;
       _status = 'Mendengarkan di port $port';

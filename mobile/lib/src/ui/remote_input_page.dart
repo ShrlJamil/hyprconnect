@@ -1,26 +1,35 @@
-//! M4: remote input — a touchpad and a keyboard for the desktop
-//! (kdeconnect.mousepad.request, same semantics as the daemon already
-//! implements for the stock app).
+//! M4 rework: remote input shaped like the stock KDE Connect app's
+//! page (his screenshots, 2026-11-22): a full-screen touchpad with
+//! the usage text in the middle, a mouse-buttons row at the bottom
+//! (left, middle, right), and the send-text and settings behind the
+//! app bar actions instead of stacked below the pad. The keyboard
+//! action shows the soft keyboard right on this page (his call,
+//! 2026-11-22): a slim typing field plus the extra keys appear above
+//! the buttons row, no separate page.
 //!
-//! Touchpad: drag moves the pointer, tap is a left click, two quick
-//! taps are a double click, holding still presses the left button
-//! down until release (so a hold-then-drag drags), and the Gerak/Gulir
-//! switch turns drags into scrolls. The pad tracks raw pointer events
-//! on purpose: with a GestureDetector the long-press recogniser would
-//! win the arena and swallow the drag that follows a hold.
-//! Keyboard: typing in the field sends each character as it is typed
-//! (edits are diffed against what was already sent, so backspace in
-//! the field sends Backspace to the desktop); the modifier chips stay
-//! on until tapped again and ride along with the next key; the arrow
-//! keys, common special keys, and F1..F12 are buttons; Tempel sends
-//! the phone clipboard as one typed string.
+//! Gestures follow the stock app and the per-device preferences
+//! (remote_input_prefs.dart): one finger drags the pointer, two
+//! fingers scroll, a tap with one/two/three fingers fires the
+//! configured click, a double tap starts a drag when that behaviour
+//! is on (press on the second tap, move, release), and holding the
+//! on-screen left button while dragging with another finger drags
+//! too. The gyro mouse, when enabled, tilts the pointer.
+//!
+//! The pad tracks raw pointer events on purpose: the multi-finger
+//! tap/scroll decisions need every pointer, which a GestureDetector
+//! arena would fight over.
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 import '../protocol/protocol.dart';
+import '../settings/remote_input_prefs.dart';
 import 'app_state.dart';
+import 'remote_input_settings_page.dart';
+import 'send_text_page.dart';
 
 class RemoteInputPage extends StatefulWidget {
   final AppState appState;
@@ -39,34 +48,43 @@ class RemoteInputPage extends StatefulWidget {
 class _RemoteInputPageState extends State<RemoteInputPage> {
   static const _tapSlop = 12.0;
   static const _tapMaxMs = 250;
-  static const _doubleTapMaxMs = 350;
-  static const _holdMs = 400;
+  static const _doubleTapWindowMs = 350;
 
+  AppState get _appState => widget.appState;
+  DeviceListEntry get _entry => widget.entry;
+  RemoteInputPrefs get _prefs => _appState.remoteInputPrefsFor(_entry.deviceId);
+
+  // ---- touch sequence state (valid while at least one pointer is
+  // down on the pad) ----
+  final Map<int, Offset> _pointers = {};
+  int? _primaryId;
+  Offset? _lastPrimaryPos;
+  Offset? _centroid;
+  DateTime? _seqDownAt;
+  int _maxPointers = 0;
+  double _movedTotal = 0;
+  bool _dragging = false;
+  bool _scrolled = false;
+  bool _dragHold = false;
+  bool _secondTap = false;
+  DateTime? _lastTapEnd;
+  Timer? _pendingTapTimer;
+
+  // ---- gyro mouse ----
+  StreamSubscription<GyroscopeEvent>? _gyroSub;
+  double _gyroFactor = 100;
+
+  // ---- inline keyboard (shown by the app bar keyboard action) ----
   final _typeController = TextEditingController();
-
-  bool _scrollMode = false;
-  double _sensitivity = 1.0;
+  final _focusNode = FocusNode();
+  bool _keyboardOpen = false;
   bool _ctrl = false;
   bool _alt = false;
   bool _shift = false;
   bool _super = false;
 
-  // Touchpad tracking for the single pointer currently down.
-  int? _pointerId;
-  Offset? _downPos;
-  Offset? _lastPos;
-  DateTime? _downAt;
-  double _moved = 0;
-  Timer? _holdTimer;
-  Timer? _tapTimer;
-  bool _holding = false;
-  bool _dragging = false;
-
   /// Text already sent to the desktop, for diffing field edits.
   String _sentText = '';
-
-  AppState get _appState => widget.appState;
-  DeviceListEntry get _entry => widget.entry;
 
   MousepadModifiers get _modifiers => MousepadModifiers(
     ctrl: _ctrl,
@@ -75,99 +93,14 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
     superKey: _super,
   );
 
-  @override
-  void dispose() {
-    _holdTimer?.cancel();
-    _tapTimer?.cancel();
-    _typeController.dispose();
-    super.dispose();
-  }
-
-  void _cancelTapTimer() {
-    _tapTimer?.cancel();
-    _tapTimer = null;
-  }
-
-  void _cancelHoldTimer() {
-    _holdTimer?.cancel();
-    _holdTimer = null;
-  }
-
-  void _onPointerDown(PointerDownEvent event) {
-    if (_pointerId != null) return;
-    _pointerId = event.pointer;
-    _downPos = event.position;
-    _lastPos = event.position;
-    _downAt = DateTime.now();
-    _moved = 0;
-    _dragging = false;
-    _cancelHoldTimer();
-    _holdTimer = Timer(const Duration(milliseconds: _holdMs), () {
-      if (_pointerId == null || _dragging) return;
-      _holding = true;
-      _appState.sendMousepadHold(_entry.deviceId, true);
-    });
-  }
-
-  void _onPointerMove(PointerMoveEvent event) {
-    if (event.pointer != _pointerId) return;
-    final last = _lastPos;
-    if (last == null) return;
-    final delta = event.position - last;
-    _lastPos = event.position;
-    _moved += delta.distance;
-    if (_moved > _tapSlop) {
-      _dragging = true;
-      _cancelHoldTimer();
-    }
-    if (!_dragging) return;
-    final dx = delta.dx * _sensitivity;
-    final dy = delta.dy * _sensitivity;
-    if (_scrollMode) {
-      _appState.sendMousepadScroll(_entry.deviceId, dx, dy);
-    } else {
-      _appState.sendMousepadMove(_entry.deviceId, dx, dy);
-    }
-  }
-
-  void _onPointerUp(PointerUpEvent event) {
-    if (event.pointer != _pointerId) return;
-    _pointerId = null;
-    _cancelHoldTimer();
-    if (_holding) {
-      _holding = false;
-      _appState.sendMousepadHold(_entry.deviceId, false);
-      return;
-    }
-    if (_dragging) return;
-    final downAt = _downAt;
-    final downPos = _downPos;
-    if (downAt == null || downPos == null) return;
-    final quick =
-        DateTime.now().difference(downAt).inMilliseconds <= _tapMaxMs &&
-        _moved <= _tapSlop;
-    if (!quick) return;
-    if (_tapTimer != null) {
-      // Second quick tap: a double click, not two singles.
-      _cancelTapTimer();
-      _appState.sendMousepadClick(_entry.deviceId, MousepadClick.doubleLeft);
-    } else {
-      _tapTimer = Timer(const Duration(milliseconds: _doubleTapMaxMs), () {
-        _tapTimer = null;
-        if (!mounted) return;
-        _appState.sendMousepadClick(_entry.deviceId, MousepadClick.left);
+  void _toggleKeyboard() {
+    setState(() => _keyboardOpen = !_keyboardOpen);
+    if (_keyboardOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _focusNode.requestFocus();
       });
-    }
-  }
-
-  void _onPointerCancel(PointerCancelEvent event) {
-    if (event.pointer != _pointerId) return;
-    _pointerId = null;
-    _cancelHoldTimer();
-    _cancelTapTimer();
-    if (_holding) {
-      _holding = false;
-      _appState.sendMousepadHold(_entry.deviceId, false);
+    } else {
+      _focusNode.unfocus();
     }
   }
 
@@ -228,233 +161,507 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
     );
   }
 
+  /// The extra-keys panel shown above the buttons row while the
+  /// soft keyboard is up: the typing field, the modifier chips, and
+  /// one horizontally scrolling row of special keys, the F1..F12
+  /// menu, and the arrow keys.
+  Widget _keyboardPanel(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('type-field'),
+                  controller: _typeController,
+                  focusNode: _focusNode,
+                  decoration: const InputDecoration(
+                    labelText: 'Ketik di sini',
+                    hintText: 'Huruf yang diketik langsung terkirim',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  textInputAction: TextInputAction.done,
+                  onChanged: _onTyped,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Tempel dari papan klip',
+                icon: const Icon(Icons.content_paste),
+                onPressed: _pasteClipboard,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              _modifierChip('Ctrl', _ctrl, (v) => _ctrl = v),
+              const SizedBox(width: 6),
+              _modifierChip('Alt', _alt, (v) => _alt = v),
+              const SizedBox(width: 6),
+              _modifierChip('Shift', _shift, (v) => _shift = v),
+              const SizedBox(width: 6),
+              _modifierChip('Super', _super, (v) => _super = v),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final key in mousepadSpecialKeys)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: OutlinedButton(
+                      onPressed: () => _sendSpecial(key.code),
+                      child: Text(key.label),
+                    ),
+                  ),
+                PopupMenuButton<int>(
+                  tooltip: 'Tombol fungsi F1 sampai F12',
+                  onSelected: _sendSpecial,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('F1..F12'),
+                        Icon(Icons.arrow_drop_down, size: 18),
+                      ],
+                    ),
+                  ),
+                  itemBuilder: (context) => [
+                    for (final key in mousepadFunctionKeys)
+                      PopupMenuItem(value: key.code, child: Text(key.label)),
+                  ],
+                ),
+                const SizedBox(width: 6),
+                for (final key in mousepadArrowKeys)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: IconButton.filledTonal(
+                      tooltip: key.label,
+                      icon: Icon(switch (key.code) {
+                        4 => Icons.arrow_back,
+                        5 => Icons.arrow_upward,
+                        6 => Icons.arrow_forward,
+                        _ => Icons.arrow_downward,
+                      }),
+                      onPressed: () => _sendSpecial(key.code),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pendingTapTimer?.cancel();
+    _gyroSub?.cancel();
+    _typeController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _cancelPendingTap() {
+    _pendingTapTimer?.cancel();
+    _pendingTapTimer = null;
+  }
+
+  /// Fire a left click that was held back for the double-tap window.
+  void _firePendingTap() {
+    _cancelPendingTap();
+    _appState.sendMousepadClick(_entry.deviceId, MousepadClick.left);
+  }
+
+  void _syncGyro(RemoteInputPrefs prefs) {
+    _gyroFactor = prefs.gyroFactor;
+    if (prefs.gyroEnabled && _gyroSub == null) {
+      _gyroSub = gyroscopeEventStream().listen((event) {
+        if (!mounted) return;
+        const deadzone = 0.08;
+        final dx = event.y.abs() > deadzone
+            ? -event.y * _gyroFactor * 0.05
+            : 0.0;
+        final dy = event.x.abs() > deadzone
+            ? -event.x * _gyroFactor * 0.05
+            : 0.0;
+        if (dx != 0 || dy != 0) {
+          _appState.sendMousepadMove(_entry.deviceId, dx, dy);
+        }
+      });
+    } else if (!prefs.gyroEnabled && _gyroSub != null) {
+      _gyroSub?.cancel();
+      _gyroSub = null;
+    }
+  }
+
+  Offset _currentCentroid() {
+    var sum = Offset.zero;
+    for (final pos in _pointers.values) {
+      sum += pos;
+    }
+    return sum / _pointers.length.toDouble();
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (_pointers.isEmpty) {
+      final now = DateTime.now();
+      _seqDownAt = now;
+      _maxPointers = 1;
+      _movedTotal = 0;
+      _dragging = false;
+      _scrolled = false;
+      _dragHold = false;
+      final prefs = _prefs;
+      _secondTap =
+          prefs.doubleTapDrag &&
+          prefs.tapOne == TapAction.left &&
+          _lastTapEnd != null &&
+          now.difference(_lastTapEnd!).inMilliseconds <= _doubleTapWindowMs;
+      if (_secondTap) {
+        // The held-back click belongs to a drag or a double click
+        // now, not to a single tap.
+        _cancelPendingTap();
+      } else if (_pendingTapTimer != null) {
+        _firePendingTap();
+      }
+      _primaryId = event.pointer;
+      _lastPrimaryPos = event.position;
+    }
+    _pointers[event.pointer] = event.position;
+    _maxPointers = math.max(_maxPointers, _pointers.length);
+    if (_pointers.length == 2) {
+      _centroid = _currentCentroid();
+    }
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (!_pointers.containsKey(event.pointer)) return;
+    _pointers[event.pointer] = event.position;
+    final prefs = _prefs;
+    if (_pointers.length == 1 && event.pointer == _primaryId) {
+      final last = _lastPrimaryPos;
+      if (last == null) return;
+      final delta = event.position - last;
+      _lastPrimaryPos = event.position;
+      _movedTotal += delta.distance;
+      if (_movedTotal <= _tapSlop) return;
+      if (_secondTap && !_dragHold) {
+        _appState.sendMousepadHold(_entry.deviceId, true);
+        _dragHold = true;
+      }
+      _dragging = true;
+      final speedGain =
+          1 + prefs.acceleration.gain * math.min(delta.distance / 24, 1.5);
+      final gain = prefs.sensitivity.factor * speedGain;
+      _appState.sendMousepadMove(
+        _entry.deviceId,
+        delta.dx * gain,
+        delta.dy * gain,
+      );
+    } else if (_pointers.length == 2 && !_dragHold) {
+      final centroid = _currentCentroid();
+      final last = _centroid;
+      _centroid = centroid;
+      if (last == null) return;
+      final delta = centroid - last;
+      if (delta == Offset.zero) return;
+      _scrolled = true;
+      final sign = prefs.reverseScroll ? -1.0 : 1.0;
+      _appState.sendMousepadScroll(
+        _entry.deviceId,
+        delta.dx * prefs.scrollFactor * sign,
+        delta.dy * prefs.scrollFactor * sign,
+      );
+    }
+  }
+
+  void _endSequence({required bool cancelled}) {
+    if (_dragHold) {
+      _appState.sendMousepadHold(_entry.deviceId, false);
+      _dragHold = false;
+      _lastTapEnd = null;
+    } else if (!cancelled && !_dragging && !_scrolled) {
+      final downAt = _seqDownAt;
+      final quick =
+          downAt != null &&
+          DateTime.now().difference(downAt).inMilliseconds <= _tapMaxMs &&
+          _movedTotal <= _tapSlop;
+      if (quick) {
+        if (_maxPointers == 1 && _secondTap) {
+          _appState.sendMousepadClick(
+            _entry.deviceId,
+            MousepadClick.doubleLeft,
+          );
+          _lastTapEnd = null;
+        } else {
+          final prefs = _prefs;
+          final action = switch (_maxPointers) {
+            1 => prefs.tapOne,
+            2 => prefs.tapTwo,
+            3 => prefs.tapThree,
+            _ => TapAction.none,
+          };
+          final click = switch (action) {
+            TapAction.left => MousepadClick.left,
+            TapAction.right => MousepadClick.right,
+            TapAction.middle => MousepadClick.middle,
+            TapAction.none => null,
+          };
+          if (click != null) {
+            if (_maxPointers == 1 &&
+                action == TapAction.left &&
+                prefs.doubleTapDrag) {
+              // Hold the click back for the double-tap window: a
+              // second tap turns it into a double click or a drag.
+              _cancelPendingTap();
+              _pendingTapTimer = Timer(
+                const Duration(milliseconds: _doubleTapWindowMs),
+                () {
+                  _pendingTapTimer = null;
+                  if (!mounted) return;
+                  _appState.sendMousepadClick(
+                    _entry.deviceId,
+                    MousepadClick.left,
+                  );
+                },
+              );
+              _lastTapEnd = DateTime.now();
+            } else {
+              _appState.sendMousepadClick(_entry.deviceId, click);
+              _lastTapEnd = null;
+            }
+          } else {
+            _lastTapEnd = null;
+          }
+        }
+      } else {
+        _lastTapEnd = null;
+      }
+    } else {
+      _lastTapEnd = null;
+    }
+    _seqDownAt = null;
+    _maxPointers = 0;
+    _movedTotal = 0;
+    _dragging = false;
+    _scrolled = false;
+    _secondTap = false;
+    _primaryId = null;
+    _lastPrimaryPos = null;
+    _centroid = null;
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    if (!_pointers.containsKey(event.pointer)) return;
+    _pointers.remove(event.pointer);
+    if (_pointers.isNotEmpty) {
+      if (event.pointer == _primaryId) {
+        _primaryId = _pointers.keys.first;
+        _lastPrimaryPos = _pointers[_primaryId];
+      }
+      _centroid = _currentCentroid();
+      return;
+    }
+    _endSequence(cancelled: false);
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    if (!_pointers.containsKey(event.pointer)) return;
+    _pointers.remove(event.pointer);
+    if (_pointers.isEmpty) {
+      _endSequence(cancelled: true);
+    }
+  }
+
+  Widget _mouseButton({
+    required Key key,
+    required int flex,
+    required bool filled,
+    required Widget icon,
+    GestureTapDownCallback? onTapDown,
+    GestureTapUpCallback? onTapUp,
+    GestureTapCancelCallback? onTapCancel,
+    GestureTapCallback? onTap,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      flex: flex,
+      child: Material(
+        key: key,
+        color: filled ? scheme.primary : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTapDown: onTapDown,
+          onTapUp: onTapUp,
+          onTapCancel: onTapCancel,
+          onTap: onTap,
+          child: SizedBox(height: 72, child: Center(child: icon)),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _appState,
       builder: (context, _) {
         final conn = _appState.connectionFor(_entry.deviceId);
+        final prefs = _prefs;
+        _syncGyro(prefs);
+        final scheme = Theme.of(context).colorScheme;
         return Scaffold(
-          appBar: AppBar(title: const Text('Masukan jarak jauh')),
+          appBar: AppBar(
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Masukan jarak jauh'),
+                Text(_entry.name, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Keyboard',
+                icon: const Icon(Icons.keyboard),
+                isSelected: _keyboardOpen,
+                onPressed: conn == null ? null : _toggleKeyboard,
+              ),
+              IconButton(
+                tooltip: 'Kirim teks',
+                icon: const Icon(Icons.edit_note),
+                onPressed: conn == null
+                    ? null
+                    : () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              SendTextPage(appState: _appState, entry: _entry),
+                        ),
+                      ),
+              ),
+              IconButton(
+                tooltip: 'Pengaturan Masukan jarak jauh',
+                icon: const Icon(Icons.settings),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => RemoteInputSettingsPage(
+                      appState: _appState,
+                      entry: _entry,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
           body: conn == null
               ? const Center(child: Text('Tidak ada koneksi ke perangkat ini.'))
-              : ListView(
-                  padding: const EdgeInsets.all(16),
+              : Column(
                   children: [
-                    const Text(
-                      'Touchpad',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Listener(
-                      onPointerDown: _onPointerDown,
-                      onPointerMove: _onPointerMove,
-                      onPointerUp: _onPointerUp,
-                      onPointerCancel: _onPointerCancel,
-                      child: Container(
+                    Expanded(
+                      child: Listener(
                         key: const ValueKey('touchpad'),
-                        height: 240,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Center(
+                        onPointerDown: _onPointerDown,
+                        onPointerMove: _onPointerMove,
+                        onPointerUp: _onPointerUp,
+                        onPointerCancel: _onPointerCancel,
+                        child: Container(
+                          color: Colors.transparent,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.all(32),
                           child: Text(
-                            _scrollMode
-                                ? 'Seret untuk menggulir'
-                                : 'Seret: gerakkan pointer\n'
-                                      'Ketuk: klik kiri\n'
-                                      'Ketuk dua kali: klik ganda\n'
-                                      'Tekan lama: tahan, lalu seret',
+                            'Geser satu jari di layar untuk '
+                            'menggerakkan kursor mouse. Ketuk untuk '
+                            'klik, dan gunakan dua atau tiga jari '
+                            'untuk tombol kanan dan tengah. Gunakan '
+                            '2 jari untuk menggulir. Ketuk dua kali '
+                            'untuk drag and drop. Tetikus giroskop '
+                            'dapat diaktifkan dari pengaturan '
+                            'masukan jarak jauh',
                             textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodyMedium,
+                            style: Theme.of(context).textTheme.titleMedium,
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.mouse),
-                            label: const Text('Klik kanan'),
-                            onPressed: () => _appState.sendMousepadClick(
-                              _entry.deviceId,
-                              MousepadClick.right,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.adjust),
-                            label: const Text('Klik tengah'),
-                            onPressed: () => _appState.sendMousepadClick(
-                              _entry.deviceId,
-                              MousepadClick.middle,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(
-                          value: false,
-                          label: Text('Gerak'),
-                          icon: Icon(Icons.open_with),
-                        ),
-                        ButtonSegment(
-                          value: true,
-                          label: Text('Gulir'),
-                          icon: Icon(Icons.swap_vert),
-                        ),
-                      ],
-                      selected: {_scrollMode},
-                      onSelectionChanged: (selection) {
-                        setState(() => _scrollMode = selection.first);
-                      },
-                    ),
-                    Row(
-                      children: [
-                        const Text('Sensitivitas'),
-                        Expanded(
-                          child: Slider(
-                            value: _sensitivity,
-                            min: 0.5,
-                            max: 3.0,
-                            divisions: 10,
-                            label: '${_sensitivity.toStringAsFixed(1)}x',
-                            onChanged: (value) {
-                              setState(() => _sensitivity = value);
-                            },
-                          ),
-                        ),
-                        Text('${_sensitivity.toStringAsFixed(1)}x'),
-                      ],
-                    ),
-                    const Divider(height: 32),
-                    const Text(
-                      'Keyboard',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      key: const ValueKey('type-field'),
-                      controller: _typeController,
-                      decoration: const InputDecoration(
-                        labelText: 'Ketik di sini',
-                        hintText: 'Huruf yang diketik langsung terkirim',
-                        border: OutlineInputBorder(),
-                      ),
-                      textInputAction: TextInputAction.done,
-                      onChanged: _onTyped,
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        icon: const Icon(Icons.content_paste),
-                        label: const Text('Tempel dari papan klip'),
-                        onPressed: _pasteClipboard,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _modifierChip('Ctrl', _ctrl, (v) => _ctrl = v),
-                        _modifierChip('Alt', _alt, (v) => _alt = v),
-                        _modifierChip('Shift', _shift, (v) => _shift = v),
-                        _modifierChip('Super', _super, (v) => _super = v),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Ctrl, Alt, Shift, dan Super tetap aktif sampai '
-                      'dimatikan lagi, dan ikut pada tombol berikutnya.',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final key in mousepadSpecialKeys)
-                          OutlinedButton(
-                            onPressed: () => _sendSpecial(key.code),
-                            child: Text(key.label),
-                          ),
-                        PopupMenuButton<int>(
-                          tooltip: 'Tombol fungsi F1 sampai F12',
-                          onSelected: _sendSpecial,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Theme.of(context).colorScheme.outline,
+                    if (_keyboardOpen) _keyboardPanel(context),
+                    if (prefs.showMouseButtons)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                        child: Row(
+                          children: [
+                            _mouseButton(
+                              key: const ValueKey('mouse-left'),
+                              flex: 11,
+                              filled: true,
+                              icon: Icon(
+                                Icons.near_me,
+                                color: scheme.onPrimary,
                               ),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text('F1..F12'),
-                                Icon(Icons.arrow_drop_down, size: 18),
-                              ],
-                            ),
-                          ),
-                          itemBuilder: (context) => [
-                            for (final key in mousepadFunctionKeys)
-                              PopupMenuItem(
-                                value: key.code,
-                                child: Text(key.label),
+                              onTapDown: (_) => _appState.sendMousepadHold(
+                                _entry.deviceId,
+                                true,
                               ),
+                              onTapUp: (_) => _appState.sendMousepadHold(
+                                _entry.deviceId,
+                                false,
+                              ),
+                              onTapCancel: () => _appState.sendMousepadHold(
+                                _entry.deviceId,
+                                false,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _mouseButton(
+                              key: const ValueKey('mouse-middle'),
+                              flex: 5,
+                              filled: false,
+                              icon: Icon(
+                                Icons.adjust,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                              onTap: () => _appState.sendMousepadClick(
+                                _entry.deviceId,
+                                MousepadClick.middle,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _mouseButton(
+                              key: const ValueKey('mouse-right'),
+                              flex: 11,
+                              filled: true,
+                              icon: Transform.flip(
+                                flipX: true,
+                                child: Icon(
+                                  Icons.near_me,
+                                  color: scheme.onPrimary,
+                                ),
+                              ),
+                              onTap: () => _appState.sendMousepadClick(
+                                _entry.deviceId,
+                                MousepadClick.right,
+                              ),
+                            ),
                           ],
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        for (final key in mousepadArrowKeys)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: IconButton.filledTonal(
-                              tooltip: key.label,
-                              icon: Icon(switch (key.code) {
-                                4 => Icons.arrow_back,
-                                5 => Icons.arrow_upward,
-                                6 => Icons.arrow_forward,
-                                _ => Icons.arrow_downward,
-                              }),
-                              onPressed: () => _sendSpecial(key.code),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Tombol panah dan tombol khusus memakai tabel tombol '
-                      'yang sama dengan aplikasi KDE Connect bawaan.',
-                      style: TextStyle(fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
+                      ),
                   ],
                 ),
         );

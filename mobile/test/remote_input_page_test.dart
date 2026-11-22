@@ -1,7 +1,12 @@
-//! Widget tests for the M4 remote input page: rendering, touchpad
-//! gestures, and keyboard sends are verified against a recording
-//! connection (sendPacket is overridden to keep the packets, so no
-//! socket is involved).
+//! Widget tests for the reworked remote input page (KDE Connect
+//! shape): the full-screen touchpad with multi-finger gestures, the
+//! mouse buttons row, the keyboard as its own page, and the settings
+//! page. Verified against a recording connection (sendPacket is
+//! overridden to keep the packets, so no socket is involved).
+//!
+//! The prefs store handed to the state has pointer acceleration off,
+//! so drag deltas sum exactly; everything else stays at the stock
+//! defaults (left/right/middle taps, double-tap drag on).
 
 import 'dart:io';
 
@@ -9,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hyprconnect_mobile/src/protocol/protocol.dart';
 import 'package:hyprconnect_mobile/src/settings/plugin_settings.dart';
+import 'package:hyprconnect_mobile/src/settings/remote_input_prefs.dart';
 import 'package:hyprconnect_mobile/src/ui/app_state.dart';
 import 'package:hyprconnect_mobile/src/ui/remote_input_page.dart';
 
@@ -43,6 +49,10 @@ class _RecordingConnection extends DeviceConnection {
   }
 }
 
+List<Packet> _with(_RecordingConnection conn, String field) {
+  return conn.sent.where((p) => p.body.containsKey(field)).toList();
+}
+
 Future<(_RecordingConnection, AppState)> _pumpedState(
   WidgetTester tester,
 ) async {
@@ -64,14 +74,19 @@ Future<(_RecordingConnection, AppState)> _pumpedState(
   addTearDown(() {
     dir.deleteSync(recursive: true);
   });
-  // A tall viewport: the page is one ListView, which only builds
-  // what is on screen — with a short viewport the keys below the
-  // fold would not exist for the finder at all.
   tester.view.physicalSize = const Size(800, 2400);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-  final state = AppState.test(settings: PluginSettings.inMemory());
+  final prefsStore = RemoteInputPrefsStore.inMemory();
+  await prefsStore.save(
+    _deviceId,
+    RemoteInputPrefs(acceleration: AccelerationPreset.off),
+  );
+  final state = AppState.test(
+    settings: PluginSettings.inMemory(),
+    remoteInputPrefs: prefsStore,
+  );
   state.registerTestConnection(conn);
   await tester.pumpWidget(
     MaterialApp(
@@ -96,23 +111,24 @@ void main() {
     expect(find.text('Tidak ada koneksi ke perangkat ini.'), findsOneWidget);
   });
 
-  testWidgets('touchpad and keyboard sections render', (tester) async {
+  testWidgets('pad, help text, and mouse buttons render', (tester) async {
     await _pumpedState(tester);
-    expect(find.text('Touchpad'), findsOneWidget);
-    expect(find.text('Keyboard'), findsOneWidget);
-    expect(find.text('Klik kanan'), findsOneWidget);
-    expect(find.text('Klik tengah'), findsOneWidget);
-    expect(find.text('Enter'), findsOneWidget);
-    expect(find.text('Esc'), findsOneWidget);
-    expect(find.text('F1..F12'), findsOneWidget);
+    expect(_pad(), findsOneWidget);
+    expect(find.textContaining('Geser satu jari di layar'), findsOneWidget);
+    expect(find.byKey(const ValueKey('mouse-left')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mouse-middle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mouse-right')), findsOneWidget);
+    expect(find.byTooltip('Keyboard'), findsOneWidget);
+    expect(find.byTooltip('Kirim teks'), findsOneWidget);
+    expect(find.byTooltip('Pengaturan Masukan jarak jauh'), findsOneWidget);
   });
 
   testWidgets('tap on the pad sends one left click', (tester) async {
     final (conn, _) = await _pumpedState(tester);
     await tester.tap(_pad());
     await tester.pump(const Duration(milliseconds: 400));
-    expect(conn.sent.length, 1);
-    expect(conn.sent.single.body, {'singleclick': true});
+    expect(_with(conn, 'singleclick'), hasLength(1));
+    expect(_with(conn, 'doubleclick'), isEmpty);
   });
 
   testWidgets('two quick taps send one double click, no single', (
@@ -123,114 +139,191 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(_pad());
     await tester.pump(const Duration(milliseconds: 400));
-    expect(conn.sent.length, 1);
-    expect(conn.sent.single.body, {'doubleclick': true});
+    expect(_with(conn, 'doubleclick'), hasLength(1));
+    expect(_with(conn, 'singleclick'), isEmpty);
   });
 
   testWidgets('drag on the pad sends move deltas that sum to the drag', (
     tester,
   ) async {
     final (conn, _) = await _pumpedState(tester);
-    await tester.drag(_pad(), const Offset(20, 10));
+    final center = tester.getCenter(_pad());
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(100, 40));
+    await gesture.up();
     await tester.pump();
-    final moves = conn.sent.where((p) => p.body['dx'] is num).toList();
+    final moves = _with(
+      conn,
+      'dx',
+    ).where((p) => !p.body.containsKey('scroll')).toList();
     expect(moves, isNotEmpty);
-    final totalDx = moves.fold<double>(
+    final sumDx = moves.fold<double>(
       0,
-      (sum, p) => sum + (p.body['dx'] as num).toDouble(),
+      (sum, p) => sum + (p.body['dx'] as num),
     );
-    final totalDy = moves.fold<double>(
+    final sumDy = moves.fold<double>(
       0,
-      (sum, p) => sum + (p.body['dy'] as num).toDouble(),
+      (sum, p) => sum + (p.body['dy'] as num),
     );
-    expect(totalDx, closeTo(20, 2));
-    expect(totalDy, closeTo(10, 2));
-    expect(moves.every((p) => !p.body.containsKey('scroll')), isTrue);
+    expect(sumDx, closeTo(100, 0.001));
+    expect(sumDy, closeTo(40, 0.001));
   });
 
-  testWidgets('long press holds the left button until release', (tester) async {
+  testWidgets('double tap then drag holds the button while moving', (
+    tester,
+  ) async {
     final (conn, _) = await _pumpedState(tester);
-    await tester.longPress(_pad());
+    await tester.tap(_pad());
+    await tester.pump(const Duration(milliseconds: 100));
+    final center = tester.getCenter(_pad());
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(60, 0));
     await tester.pump();
-    expect(conn.sent.length, 2);
-    expect(conn.sent[0].body, {'singlehold': true});
-    expect(conn.sent[1].body, {'singlerelease': true});
+    expect(_with(conn, 'singlehold'), hasLength(1));
+    expect(_with(conn, 'singleclick'), isEmpty);
+    await gesture.up();
+    await tester.pump();
+    expect(_with(conn, 'singlerelease'), hasLength(1));
   });
 
-  testWidgets('Gulir mode turns a drag into scroll packets', (tester) async {
+  testWidgets('two finger tap sends a right click', (tester) async {
     final (conn, _) = await _pumpedState(tester);
-    await tester.tap(find.text('Gulir'));
+    final center = tester.getCenter(_pad());
+    final g1 = await tester.startGesture(center);
+    final g2 = await tester.startGesture(center + const Offset(80, 0));
+    await g1.up();
+    await g2.up();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(_with(conn, 'rightclick'), hasLength(1));
+  });
+
+  testWidgets('three finger tap sends a middle click', (tester) async {
+    final (conn, _) = await _pumpedState(tester);
+    final center = tester.getCenter(_pad());
+    final g1 = await tester.startGesture(center);
+    final g2 = await tester.startGesture(center + const Offset(80, 0));
+    final g3 = await tester.startGesture(center + const Offset(160, 0));
+    await g1.up();
+    await g2.up();
+    await g3.up();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(_with(conn, 'middleclick'), hasLength(1));
+  });
+
+  testWidgets('two finger drag scrolls', (tester) async {
+    final (conn, _) = await _pumpedState(tester);
+    final center = tester.getCenter(_pad());
+    final g1 = await tester.startGesture(center);
+    final g2 = await tester.startGesture(center + const Offset(80, 0));
+    await g1.moveBy(const Offset(0, 30));
+    await g2.moveBy(const Offset(0, 30));
+    await g1.up();
+    await g2.up();
     await tester.pump();
-    await tester.drag(_pad(), const Offset(0, -30));
-    await tester.pump();
-    final scrolls = conn.sent.where((p) => p.body['scroll'] == true).toList();
+    final scrolls = _with(conn, 'scroll');
     expect(scrolls, isNotEmpty);
-    final totalDy = scrolls.fold<double>(
+    final sumDy = scrolls.fold<double>(
       0,
-      (sum, p) => sum + (p.body['dy'] as num).toDouble(),
+      (sum, p) => sum + (p.body['dy'] as num),
     );
-    expect(totalDy, closeTo(-30, 2));
+    // Centroid travel 30, default scroll factor 0.2 + 1.8 * 0.9.
+    expect(sumDy, closeTo(30 * 1.82, 1.5));
   });
 
-  testWidgets('Klik kanan and Klik tengah send their buttons', (tester) async {
+  testWidgets('mouse buttons row sends its clicks and holds', (tester) async {
     final (conn, _) = await _pumpedState(tester);
-    await tester.tap(find.text('Klik kanan'));
+    await tester.tap(find.byKey(const ValueKey('mouse-right')));
     await tester.pump();
-    await tester.tap(find.text('Klik tengah'));
+    expect(_with(conn, 'rightclick'), hasLength(1));
+    await tester.tap(find.byKey(const ValueKey('mouse-middle')));
     await tester.pump();
-    expect(conn.sent.length, 2);
-    expect(conn.sent[0].body, {'rightclick': true});
-    expect(conn.sent[1].body, {'middleclick': true});
+    expect(_with(conn, 'middleclick'), hasLength(1));
+    final left = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('mouse-left'))),
+    );
+    await tester.pump();
+    expect(_with(conn, 'singlehold'), hasLength(1));
+    await left.up();
+    await tester.pump();
+    expect(_with(conn, 'singlerelease'), hasLength(1));
   });
 
-  testWidgets('typing sends the text, edits send Backspace', (tester) async {
+  testWidgets('settings page toggles the mouse buttons row', (tester) async {
+    await _pumpedState(tester);
+    await tester.tap(find.byTooltip('Pengaturan Masukan jarak jauh'));
+    await tester.pumpAndSettle();
+    expect(find.text('Setel aksi ketuk satu jari'), findsOneWidget);
+    expect(find.text('Pengaturan Masukan jarak jauh'), findsWidgets);
+    final tile = find.ancestor(
+      of: find.text('Tampilkan tombol tetikus'),
+      matching: find.byType(SwitchListTile),
+    );
+    await tester.tap(find.descendant(of: tile, matching: find.byType(Switch)));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mouse-left')), findsNothing);
+  });
+
+  testWidgets('inline keyboard: typing, edits, specials, modifiers, arrows', (
+    tester,
+  ) async {
     final (conn, _) = await _pumpedState(tester);
+    await tester.tap(find.byTooltip('Keyboard'));
+    await tester.pumpAndSettle();
     final field = find.byKey(const ValueKey('type-field'));
-    await tester.ensureVisible(field);
-    await tester.enterText(field, 'ab');
-    await tester.pump();
-    expect(conn.sent.length, 1);
-    expect(conn.sent.single.body, {'key': 'ab'});
-    await tester.enterText(field, 'abc');
-    await tester.pump();
-    expect(conn.sent.length, 2);
-    expect(conn.sent[1].body, {'key': 'c'});
-    await tester.enterText(field, 'ab');
-    await tester.pump();
-    expect(conn.sent.length, 3);
-    expect(conn.sent[2].body, {'specialKey': 1});
-  });
+    expect(field, findsOneWidget);
+    expect(find.text('Enter'), findsOneWidget);
+    expect(find.text('Esc'), findsOneWidget);
+    expect(find.text('F1..F12'), findsOneWidget);
 
-  testWidgets('Enter button sends specialKey 12', (tester) async {
-    final (conn, _) = await _pumpedState(tester);
-    final enter = find.text('Enter');
-    await tester.tap(enter);
+    await tester.enterText(field, 'halo');
     await tester.pump();
-    expect(conn.sent.length, 1);
-    expect(conn.sent.single.body['specialKey'], 12);
-  });
+    final typed = _with(conn, 'key').map((p) => p.body['key']).toList();
+    expect(typed, contains('halo'));
 
-  testWidgets('a modifier chip rides along with the next key', (tester) async {
-    final (conn, _) = await _pumpedState(tester);
-    final ctrl = find.text('Ctrl');
-    await tester.tap(ctrl);
+    await tester.enterText(field, 'hal');
     await tester.pump();
-    final enter = find.text('Enter');
-    await tester.tap(enter);
-    await tester.pump();
-    expect(conn.sent.length, 1);
-    expect(conn.sent.single.body['specialKey'], 12);
-    expect(conn.sent.single.body['ctrl'], isTrue);
-  });
+    final backspaces = conn.sent
+        .where((p) => p.body['specialKey'] == 1)
+        .toList();
+    expect(backspaces, hasLength(1));
 
-  testWidgets('arrow buttons send the daemon arrow codes', (tester) async {
-    final (conn, _) = await _pumpedState(tester);
+    await tester.tap(find.text('Enter'));
+    await tester.pump();
+    expect(conn.sent.where((p) => p.body['specialKey'] == 12), hasLength(1));
+
+    await tester.tap(find.text('Ctrl'));
+    await tester.pump();
+    await tester.enterText(field, 'hala');
+    await tester.pump();
+    final ctrlKey = conn.sent.lastWhere((p) => p.body['key'] == 'a');
+    expect(ctrlKey.body['ctrl'], isTrue);
+
+    await tester.ensureVisible(find.byIcon(Icons.arrow_upward));
+    await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.arrow_upward));
     await tester.pump();
-    await tester.tap(find.byIcon(Icons.arrow_downward));
-    await tester.pump();
-    expect(conn.sent.length, 2);
-    expect(conn.sent[0].body['specialKey'], 5);
-    expect(conn.sent[1].body['specialKey'], 7);
+    expect(conn.sent.where((p) => p.body['specialKey'] == 5), hasLength(1));
+  });
+
+  test('remote input prefs roundtrip keeps changed values', () {
+    final prefs = RemoteInputPrefs(
+      tapTwo: TapAction.left,
+      sensitivity: SensitivityPreset.fast,
+      reverseScroll: true,
+      gyroEnabled: true,
+      showMouseButtons: false,
+    );
+    final back = RemoteInputPrefs.fromJson(prefs.toJson());
+    expect(back.tapTwo, TapAction.left);
+    expect(back.sensitivity, SensitivityPreset.fast);
+    expect(back.reverseScroll, isTrue);
+    expect(back.gyroEnabled, isTrue);
+    expect(back.showMouseButtons, isFalse);
+    final defaults = RemoteInputPrefs.fromJson(const {});
+    expect(defaults.tapOne, TapAction.left);
+    expect(defaults.acceleration, AccelerationPreset.medium);
+    expect(defaults.doubleTapDrag, isTrue);
   });
 }

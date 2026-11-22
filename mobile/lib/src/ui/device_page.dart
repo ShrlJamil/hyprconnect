@@ -403,13 +403,6 @@ class _DevicePageState extends State<DevicePage> {
                     _FeatureTile(
                       icon: _tileIcon(tile.pluginId),
                       title: tile.title,
-                      subtitle:
-                          _appState.pluginSettings.isEnabled(
-                            _entry.deviceId,
-                            tile.pluginId,
-                          )
-                          ? pluginById(tile.pluginId)?.description ?? ''
-                          : 'Plugin nonaktif',
                       enabled: _appState.pluginSettings.isEnabled(
                         _entry.deviceId,
                         tile.pluginId,
@@ -429,14 +422,12 @@ class _DevicePageState extends State<DevicePage> {
 class _FeatureTile extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String subtitle;
   final bool enabled;
   final VoidCallback onTap;
 
   const _FeatureTile({
     required this.icon,
     required this.title,
-    required this.subtitle,
     required this.enabled,
     required this.onTap,
   });
@@ -464,14 +455,6 @@ class _FeatureTile extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.titleSmall
-                    ?.copyWith(color: foreground),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: foreground),
               ),
             ],

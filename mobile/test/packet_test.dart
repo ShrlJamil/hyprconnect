@@ -62,10 +62,10 @@ void main() {
       tcpPort: 1714,
       disabledPlugins: {'share', 'clipboard'},
     );
-    final incoming =
-        (packet.body['incomingCapabilities'] as List).cast<String>();
-    final outgoing =
-        (packet.body['outgoingCapabilities'] as List).cast<String>();
+    final incoming = (packet.body['incomingCapabilities'] as List)
+        .cast<String>();
+    final outgoing = (packet.body['outgoingCapabilities'] as List)
+        .cast<String>();
     expect(incoming, isNot(contains('kdeconnect.share.request')));
     expect(outgoing, isNot(contains('kdeconnect.share.request')));
     expect(incoming, isNot(contains('kdeconnect.clipboard')));
@@ -82,13 +82,12 @@ void main() {
     expect(pluginForPacketType('kdeconnect.ping'), isNull);
     expect(pluginForPacketType('kdeconnect.pair'), isNull);
     expect(pluginForPacketType('kdeconnect.runcommand'), isNull);
-    expect(
-      pluginForPacketType('kdeconnect.mousepad.request'),
-      'remoteinput',
-    );
+    expect(pluginForPacketType('kdeconnect.mousepad.request'), 'remoteinput');
     expect(pluginForPacketType('kdeconnect.presenter'), 'presenter');
-    expect(pluginForPacketType('kdeconnect.findmyphone.request'),
-        'findmyphone');
+    expect(
+      pluginForPacketType('kdeconnect.findmyphone.request'),
+      'findmyphone',
+    );
     expect(pluginForPacketType('kdeconnect.systemvolume'), 'systemvolume');
   });
 }

@@ -22,12 +22,8 @@ void main() {
   test('verification key matches the daemon formula (known vector)', () {
     // SPKI fiktif; nilai harapan dihitung independen dengan sha256sum:
     // SHA256(besar + kecil) -> 8 hex pertama, huruf besar.
-    final a = Uint8List.fromList(
-      [0x30, 0x82, 0x01, 0x22, 0x01, 0x00],
-    );
-    final b = Uint8List.fromList(
-      [0x30, 0x82, 0x01, 0x22, 0x01, 0xff],
-    );
+    final a = Uint8List.fromList([0x30, 0x82, 0x01, 0x22, 0x01, 0x00]);
+    final b = Uint8List.fromList([0x30, 0x82, 0x01, 0x22, 0x01, 0xff]);
     expect(LocalIdentity.verificationKey(a, b), '10E4D84D');
     // Simetris: urutan argumen tidak berpengaruh.
     expect(LocalIdentity.verificationKey(b, a), '10E4D84D');

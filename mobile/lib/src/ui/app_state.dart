@@ -90,7 +90,7 @@ class AppState extends ChangeNotifier {
   final Map<String, int?> _runningCommandIds = {};
   String? _lastClipboardSent;
   String? _lastClipboardApplied;
-  String _status = 'Memulai...';
+  String _status = 'Starting...';
   bool _started = false;
 
   LocalIdentity? get identity => _identity;
@@ -286,11 +286,11 @@ class AppState extends ChangeNotifier {
       _remoteInputPrefs = remoteInputPrefs;
       _listener = listener;
       _discovery = discovery;
-      _status = 'Mendengarkan di port $port';
-      _logLine('Identitas: ${identity.deviceId}');
+      _status = 'Listening on port $port';
+      _logLine('Identity: ${identity.deviceId}');
       notifyListeners();
     } catch (e) {
-      _status = 'Gagal memulai: $e';
+      _status = 'Failed to start: $e';
       notifyListeners();
     }
   }
@@ -346,7 +346,7 @@ class AppState extends ChangeNotifier {
     try {
       switch (packet.type) {
         case 'kdeconnect.ping':
-          _logLine('Ping dari ${conn.remoteName}');
+          _logLine('Ping from ${conn.remoteName}');
         case 'kdeconnect.clipboard':
         case 'kdeconnect.clipboard.connect':
           final content = packet.body['content'] as String?;
@@ -367,7 +367,7 @@ class AppState extends ChangeNotifier {
           _handlePresenter(conn, packet);
       }
     } catch (e) {
-      _logLine('Gagal menangani ${packet.type}: $e');
+      _logLine('Failed to handle ${packet.type}: $e');
     }
     notifyListeners();
   }
@@ -404,7 +404,7 @@ class AppState extends ChangeNotifier {
         try {
           await conn.requestMprisAlbumArt(state.player, artUrl);
         } catch (e) {
-          _logLine('Gagal meminta sampul album: $e');
+          _logLine('Failed to request album art: $e');
         }
       }
     }
@@ -428,9 +428,9 @@ class AppState extends ChangeNotifier {
       final file = File('${dir.path}/$filename');
       await file.writeAsBytes(bytes);
       _albumArtPaths['$deviceId|$player'] = file.path;
-      _logLine('Sampul album diterima untuk $player (${bytes.length} byte)');
+      _logLine('Album art received for $player (${bytes.length} bytes)');
     } catch (e) {
-      _logLine('Gagal menerima sampul album: $e');
+      _logLine('Failed to receive album art: $e');
     }
   }
 
@@ -442,8 +442,8 @@ class AppState extends ChangeNotifier {
     _commandLists[deviceId] = parseCommandList(packet);
     _canAddCommands[deviceId] = canAddCommandOf(packet);
     _logLine(
-      'Daftar perintah diterima dari ${conn.remoteName} '
-      '(${_commandLists[deviceId]!.length} perintah)',
+      'Command list received from ${conn.remoteName} '
+      '(${_commandLists[deviceId]!.length} commands)',
     );
   }
 
@@ -480,7 +480,7 @@ class AppState extends ChangeNotifier {
     _monitorLists[deviceId] = list.monitors;
     _presenterMonitors[deviceId] = list.presenterMonitor;
     _logLine(
-      'Daftar monitor diterima dari ${conn.remoteName} '
+      'Monitor list received from ${conn.remoteName} '
       '(${list.monitors.length} monitor)',
     );
   }
@@ -502,8 +502,8 @@ class AppState extends ChangeNotifier {
     _lastReceivedAt = DateTime.now();
     await Clipboard.setData(ClipboardData(text: content));
     _logLine(
-      'Papan klip diterima dari ${conn.remoteName} '
-      '(${content.length} karakter)',
+      'Clipboard received from ${conn.remoteName} '
+      '(${content.length} characters)',
     );
   }
 
@@ -518,23 +518,23 @@ class AppState extends ChangeNotifier {
     }
     final url = packet.body['url'] as String?;
     if (url != null) {
-      _logLine('Tautan dibagikan dari ${conn.remoteName}: $url');
+      _logLine('Link shared from ${conn.remoteName}: $url');
       return;
     }
     final dir = _receiveDir;
     if (dir == null) {
-      _logLine('Tidak ada folder terima, file ditolak');
+      _logLine('No receive folder, file rejected');
       return;
     }
     try {
       final received = await conn.receiveFile(packet, dir);
       _receivedFiles.insert(0, received);
       _logLine(
-        'File diterima: ${received.filename} (${received.size} byte) '
+        'File received: ${received.filename} (${received.size} bytes) '
         '-> ${received.path}',
       );
     } catch (e) {
-      _logLine('Gagal menerima file dari ${conn.remoteName}: $e');
+      _logLine('Failed to receive file from ${conn.remoteName}: $e');
     }
   }
 
@@ -558,10 +558,10 @@ class AppState extends ChangeNotifier {
       );
       _registerConnection(conn);
       _logLine(
-        'Terhubung (masuk) dari ${conn.remoteName} (${conn.remoteDeviceId})',
+        'Connected (incoming) from ${conn.remoteName} (${conn.remoteDeviceId})',
       );
     } catch (e) {
-      _logLine('Koneksi masuk gagal: $e');
+      _logLine('Incoming connection failed: $e');
       await raw.close();
     }
   }
@@ -622,20 +622,18 @@ class AppState extends ChangeNotifier {
       if (existing != null && existing.isConnected) {
         return ConnectOutcome.connected;
       }
-      _logLine(
-        'Menunggu ${entry.name} menghubungi balik untuk pairing pertama',
-      );
+      _logLine('Waiting for ${entry.name} to connect back for first pairing');
       _discovery?.broadcastIdentity();
       final deadline = DateTime.now().add(const Duration(seconds: 25));
       while (DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 250));
         final conn = _connections[entry.deviceId];
         if (conn != null && conn.isConnected) {
-          _logLine('Kanal masuk dari ${entry.name} terbuka');
+          _logLine('Incoming channel from ${entry.name} is open');
           return ConnectOutcome.connected;
         }
       }
-      _logLine('${entry.name} tidak menghubungi balik dalam 25 detik');
+      _logLine('${entry.name} did not connect back within 25 seconds');
       notifyListeners();
       return ConnectOutcome.failed;
     }
@@ -655,10 +653,10 @@ class AppState extends ChangeNotifier {
         peerCertDer: knownCert,
       );
       _registerConnection(conn);
-      _logLine('Terhubung (keluar) ke ${entry.name}');
+      _logLine('Connected (outgoing) to ${entry.name}');
       return ConnectOutcome.connected;
     } catch (e) {
-      _logLine('Gagal terhubung ke ${entry.name}: $e');
+      _logLine('Failed to connect to ${entry.name}: $e');
       notifyListeners();
       return ConnectOutcome.failed;
     }
@@ -669,9 +667,9 @@ class AppState extends ChangeNotifier {
     if (conn == null) return;
     try {
       await conn.requestPair();
-      _logLine('Meminta pairing ke ${conn.remoteName}');
+      _logLine('Requesting pairing with ${conn.remoteName}');
     } catch (e) {
-      _logLine('Pairing gagal: $e');
+      _logLine('Pairing failed: $e');
     }
     notifyListeners();
   }
@@ -681,9 +679,9 @@ class AppState extends ChangeNotifier {
     if (conn == null) return;
     try {
       await conn.rejectPair();
-      _logLine('Menolak pairing dari ${conn.remoteName}');
+      _logLine('Rejecting pairing from ${conn.remoteName}');
     } catch (e) {
-      _logLine('Tolak pairing gagal: $e');
+      _logLine('Reject pairing failed: $e');
     }
     notifyListeners();
   }
@@ -723,7 +721,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.requestSinks();
     } catch (e) {
-      _logLine('Gagal meminta daftar perangkat audio: $e');
+      _logLine('Failed to request audio device list: $e');
     }
     notifyListeners();
   }
@@ -741,7 +739,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendSinkVolume(sink.name, raw);
     } catch (e) {
-      _logLine('Atur volume perangkat gagal: $e');
+      _logLine('Failed to set device volume: $e');
     }
     notifyListeners();
   }
@@ -753,7 +751,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendSinkMuted(sink.name, muted);
     } catch (e) {
-      _logLine('Atur mute perangkat gagal: $e');
+      _logLine('Failed to set device mute: $e');
     }
     notifyListeners();
   }
@@ -765,7 +763,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendSinkEnabled(sink.name);
     } catch (e) {
-      _logLine('Pilih perangkat audio gagal: $e');
+      _logLine('Failed to select audio device: $e');
     }
     notifyListeners();
   }
@@ -779,7 +777,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.requestMprisPlayerList();
     } catch (e) {
-      _logLine('Gagal meminta daftar player: $e');
+      _logLine('Failed to request player list: $e');
     }
     notifyListeners();
   }
@@ -793,7 +791,7 @@ class AppState extends ChangeNotifier {
       try {
         await conn.requestMprisNowPlaying(player);
       } catch (e) {
-        _logLine('Gagal meminta status player: $e');
+        _logLine('Failed to request player status: $e');
       }
     }
     notifyListeners();
@@ -807,7 +805,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMprisAction(player, action);
     } catch (e) {
-      _logLine('Kendali multimedia gagal: $e');
+      _logLine('Multimedia control failed: $e');
     }
     notifyListeners();
   }
@@ -820,7 +818,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMprisVolume(player, volume);
     } catch (e) {
-      _logLine('Atur volume gagal: $e');
+      _logLine('Failed to set volume: $e');
     }
     notifyListeners();
   }
@@ -834,7 +832,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMprisSeek(player, seconds * 1000000);
     } catch (e) {
-      _logLine('Seek gagal: $e');
+      _logLine('Seek failed: $e');
     }
     notifyListeners();
   }
@@ -847,7 +845,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMprisSetPosition(player, seconds * 1000000);
     } catch (e) {
-      _logLine('Pindah posisi gagal: $e');
+      _logLine('Failed to set position: $e');
     }
     notifyListeners();
   }
@@ -859,7 +857,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.requestRunCommandList();
     } catch (e) {
-      _logLine('Gagal meminta daftar perintah: $e');
+      _logLine('Failed to request command list: $e');
     }
     notifyListeners();
   }
@@ -872,7 +870,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.runRemoteCommand(key);
     } catch (e) {
-      _logLine('Jalankan perintah gagal: $e');
+      _logLine('Run command failed: $e');
     }
     notifyListeners();
   }
@@ -884,7 +882,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.stopRemoteCommands();
     } catch (e) {
-      _logLine('Hentikan perintah gagal: $e');
+      _logLine('Stop commands failed: $e');
     }
     notifyListeners();
   }
@@ -896,7 +894,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.requestRunCommandSetup();
     } catch (e) {
-      _logLine('Buka editor perintah gagal: $e');
+      _logLine('Failed to open command editor: $e');
     }
     notifyListeners();
   }
@@ -909,7 +907,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMousepadMove(dx, dy);
     } catch (e) {
-      _logLine('Gerak pointer gagal: $e');
+      _logLine('Pointer move failed: $e');
     }
   }
 
@@ -920,7 +918,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMousepadScroll(dx, dy);
     } catch (e) {
-      _logLine('Gulir gagal: $e');
+      _logLine('Scroll failed: $e');
     }
   }
 
@@ -931,7 +929,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMousepadClick(click);
     } catch (e) {
-      _logLine('Klik gagal: $e');
+      _logLine('Click failed: $e');
     }
     notifyListeners();
   }
@@ -943,7 +941,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMousepadHold(down);
     } catch (e) {
-      _logLine('Tahan klik gagal: $e');
+      _logLine('Click hold failed: $e');
     }
     notifyListeners();
   }
@@ -959,7 +957,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMousepadKey(char, modifiers);
     } catch (e) {
-      _logLine('Ketik gagal: $e');
+      _logLine('Typing failed: $e');
     }
     notifyListeners();
   }
@@ -971,7 +969,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMousepadType(text);
     } catch (e) {
-      _logLine('Ketik teks gagal: $e');
+      _logLine('Type text failed: $e');
     }
     notifyListeners();
   }
@@ -988,7 +986,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendMousepadSpecialKey(code, modifiers);
     } catch (e) {
-      _logLine('Tombol khusus gagal: $e');
+      _logLine('Special key failed: $e');
     }
     notifyListeners();
   }
@@ -1002,7 +1000,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendPresenterMove(dx, dy);
     } catch (e) {
-      _logLine('Gerak pointer presenter gagal: $e');
+      _logLine('Presenter pointer move failed: $e');
     }
   }
 
@@ -1013,7 +1011,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendPresenterStop();
     } catch (e) {
-      _logLine('Berhenti presenter gagal: $e');
+      _logLine('Presenter stop failed: $e');
     }
     notifyListeners();
   }
@@ -1026,7 +1024,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.requestPresenterMonitors();
     } catch (e) {
-      _logLine('Gagal meminta daftar monitor: $e');
+      _logLine('Failed to request monitor list: $e');
     }
     notifyListeners();
   }
@@ -1041,7 +1039,7 @@ class AppState extends ChangeNotifier {
     try {
       await conn.setPresenterMonitor(monitor);
     } catch (e) {
-      _logLine('Pilih monitor presenter gagal: $e');
+      _logLine('Failed to set presenter monitor: $e');
     }
     notifyListeners();
   }
@@ -1075,7 +1073,7 @@ class AppState extends ChangeNotifier {
       try {
         await file.writeAsString(jsonEncode(_presenterNotes));
       } catch (e) {
-        _logLine('Simpan catatan presenter gagal: $e');
+        _logLine('Failed to save presenter notes: $e');
       }
     }
     notifyListeners();
@@ -1091,13 +1089,13 @@ class AppState extends ChangeNotifier {
     try {
       await conn.sendClipboard(content);
       _logLine(
-        'Papan klip terkirim ke ${conn.remoteName} '
-        '(${content.length} karakter)',
+        'Clipboard sent to ${conn.remoteName} '
+        '(${content.length} characters)',
       );
       notifyListeners();
       return true;
     } catch (e) {
-      _logLine('Papan klip gagal: $e');
+      _logLine('Clipboard failed: $e');
       notifyListeners();
       rethrow;
     }
@@ -1121,9 +1119,9 @@ class AppState extends ChangeNotifier {
         bytes: bytes,
         onProgress: onProgress,
       );
-      _logLine('File terkirim ke ${conn.remoteName}: $filename ($size byte)');
+      _logLine('File sent to ${conn.remoteName}: $filename ($size bytes)');
     } catch (e) {
-      _logLine('File gagal: $e');
+      _logLine('File failed: $e');
       rethrow;
     } finally {
       notifyListeners();
@@ -1140,10 +1138,10 @@ class AppState extends ChangeNotifier {
     final conn = _connections[deviceId];
     if (conn == null) return;
     try {
-      await conn.sendPing(message ?? 'Halo dari HyprConnect');
-      _logLine('Ping terkirim ke ${conn.remoteName}');
+      await conn.sendPing(message ?? 'Hello from HyprConnect');
+      _logLine('Ping sent to ${conn.remoteName}');
     } catch (e) {
-      _logLine('Ping gagal: $e');
+      _logLine('Ping failed: $e');
     }
     notifyListeners();
   }
@@ -1154,9 +1152,9 @@ class AppState extends ChangeNotifier {
     if (conn == null) return;
     try {
       await conn.unpair();
-      _logLine('Leraikan pairing dengan ${conn.remoteName}');
+      _logLine('Unpaired from ${conn.remoteName}');
     } catch (e) {
-      _logLine('Leraikan gagal: $e');
+      _logLine('Unpair failed: $e');
     }
     notifyListeners();
   }

@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
 import 'app_state.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -13,7 +14,7 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pengaturan')),
+      appBar: AppBar(title: Text(context.l10n.settings)),
       body: AnimatedBuilder(
         animation: appState,
         builder: (context, _) {
@@ -24,7 +25,7 @@ class SettingsPage extends StatelessWidget {
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.smartphone, size: 36),
-                  title: const Text('Perangkat ini'),
+                  title: Text(context.l10n.thisDevice),
                   subtitle: identity == null
                       ? Text(appState.status)
                       : SelectableText(
@@ -38,13 +39,16 @@ class SettingsPage extends StatelessWidget {
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.folder, size: 36),
-                    title: const Text('Folder file diterima'),
+                    title: Text(context.l10n.receivedFilesFolder),
                     subtitle: SelectableText(appState.receiveDirPath!),
                   ),
                 ),
               ],
               const SizedBox(height: 16),
-              Text('Log', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                context.l10n.log,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               Container(
                 height: 300,

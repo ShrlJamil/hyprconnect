@@ -15,103 +15,33 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// One plugin the user can switch on or off for a device.
+/// One plugin the user can switch on or off for a device. Display
+/// strings live in the ARB files now (English first, Indonesian
+/// translation) and are resolved by plugin id in
+/// lib/src/ui/plugin_text.dart.
 class PluginInfo {
   /// Stable id, identical to the daemon's plugin names.
   final String id;
 
-  /// Indonesian label shown in the plugin settings page.
-  final String title;
-
-  /// One-line explanation of what the plugin does.
-  final String description;
-
-  /// Which device-page tile this plugin powers, if any. Plugins
-  /// without a tile (notification, battery, ...) still appear in the
-  /// settings page; they just have no tile to grey out.
-  final String? tileTitle;
-
   /// Which build phase delivers the tile's feature, if it has one.
   final String? tilePhase;
 
-  const PluginInfo({
-    required this.id,
-    required this.title,
-    required this.description,
-    this.tileTitle,
-    this.tilePhase,
-  });
+  const PluginInfo({required this.id, this.tilePhase});
 }
 
 /// The plugin catalog, in the daemon's PLUGIN_NAMES order.
 const List<PluginInfo> pluginCatalog = [
-  PluginInfo(
-    id: 'clipboard',
-    title: 'Papan klip',
-    description: 'Kirim dan terima isi papan klip dengan desktop.',
-    tileTitle: 'Kirim papan klip',
-    tilePhase: 'M2',
-  ),
-  PluginInfo(
-    id: 'share',
-    title: 'Kirim file',
-    description: 'Kirim file ke desktop dan terima file darinya.',
-    tileTitle: 'Kirim file',
-    tilePhase: 'M2',
-  ),
-  PluginInfo(
-    id: 'notification',
-    title: 'Notifikasi',
-    description: 'Tampilkan notifikasi desktop di HP.',
-  ),
-  PluginInfo(
-    id: 'mpris',
-    title: 'Kendali multimedia',
-    description: 'Putar, jeda, dan ganti lagu di desktop.',
-    tileTitle: 'Kendali multimedia',
-    tilePhase: 'M3',
-  ),
-  PluginInfo(
-    id: 'systemvolume',
-    title: 'Volume sistem',
-    description: 'Atur volume speaker desktop.',
-  ),
-  PluginInfo(
-    id: 'sftp',
-    title: 'Jelajah file (SFTP)',
-    description: 'Akses file desktop lewat SFTP.',
-  ),
-  PluginInfo(
-    id: 'presenter',
-    title: 'Presentation remote',
-    description: 'Kendalikan presentasi dan arahkan pointer.',
-    tileTitle: 'Presentation remote',
-    tilePhase: 'M5',
-  ),
-  PluginInfo(
-    id: 'remoteinput',
-    title: 'Masukan jarak jauh',
-    description: 'Touchpad dan keyboard untuk desktop.',
-    tileTitle: 'Masukan jarak jauh',
-    tilePhase: 'M4',
-  ),
-  PluginInfo(
-    id: 'battery',
-    title: 'Baterai',
-    description: 'Kirim status baterai HP ke desktop.',
-  ),
-  PluginInfo(
-    id: 'findmyphone',
-    title: 'Cari HP',
-    description: 'Bunyikan HP dari desktop.',
-  ),
-  PluginInfo(
-    id: 'runcommand',
-    title: 'Jalankan perintah',
-    description: 'Jalankan perintah di desktop dan lihat hasilnya.',
-    tileTitle: 'Jalankan Perintah',
-    tilePhase: 'M3',
-  ),
+  PluginInfo(id: 'clipboard', tilePhase: 'M2'),
+  PluginInfo(id: 'share', tilePhase: 'M2'),
+  PluginInfo(id: 'notification'),
+  PluginInfo(id: 'mpris', tilePhase: 'M3'),
+  PluginInfo(id: 'systemvolume'),
+  PluginInfo(id: 'sftp'),
+  PluginInfo(id: 'presenter', tilePhase: 'M5'),
+  PluginInfo(id: 'remoteinput', tilePhase: 'M4'),
+  PluginInfo(id: 'battery'),
+  PluginInfo(id: 'findmyphone'),
+  PluginInfo(id: 'runcommand', tilePhase: 'M3'),
 ];
 
 PluginInfo? pluginById(String id) {
@@ -123,13 +53,13 @@ PluginInfo? pluginById(String id) {
 
 /// The six device-page tiles, in the order the M1 shell shows them.
 /// Each tile is powered by one plugin.
-const List<({String pluginId, String title})> deviceTiles = [
-  (pluginId: 'share', title: 'Kirim file'),
-  (pluginId: 'clipboard', title: 'Kirim papan klip'),
-  (pluginId: 'presenter', title: 'Presentation remote'),
-  (pluginId: 'mpris', title: 'Kendali multimedia'),
-  (pluginId: 'remoteinput', title: 'Masukan jarak jauh'),
-  (pluginId: 'runcommand', title: 'Jalankan Perintah'),
+const List<({String pluginId})> deviceTiles = [
+  (pluginId: 'share'),
+  (pluginId: 'clipboard'),
+  (pluginId: 'presenter'),
+  (pluginId: 'mpris'),
+  (pluginId: 'remoteinput'),
+  (pluginId: 'runcommand'),
 ];
 
 class PluginSettings {

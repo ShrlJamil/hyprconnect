@@ -1,0 +1,231 @@
+{
+  "@@locale": "en",
+  "about": "About",
+  "aboutBody": "Companion app for the HyprConnect daemon on your desktop. It speaks the KDE Connect protocol, so it can still talk to the stock KDE Connect on desktops and other phones.",
+  "accelHigh": "High",
+  "accelLow": "Low",
+  "accelMedium": "Medium",
+  "accelOff": "Off",
+  "accept": "Accept",
+  "addSlide": "Add slide",
+  "arrivesInPhase": "Arrives in phase {phase}",
+  "@arrivesInPhase": {
+    "placeholders": {
+      "phase": {
+        "type": "String"
+      }
+    }
+  },
+  "automatic": "Automatic",
+  "back": "Back",
+  "cancel": "Cancel",
+  "cancelRequest": "Cancel request",
+  "certFingerprint": "Certificate fingerprint (SHA-256)",
+  "clipboardEmpty": "Clipboard is empty or not text.",
+  "clipboardSendFailed": "Failed to send clipboard: {error}",
+  "@clipboardSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "clipboardSent": "Clipboard sent",
+  "connect": "Connect",
+  "connectFailed": "Failed to connect. Check the log in Settings.",
+  "copy": "Copy",
+  "createNotes": "Create notes",
+  "deviceIdLabel": "Device ID",
+  "deviceMenu": "Device menu",
+  "deviceOffline": "Device offline",
+  "devices": "Devices",
+  "doubleTapToDrag": "Double tap to drag",
+  "dragAndDropBehavior": "Drag and drop behavior",
+  "editCommandsOnDesktop": "Edit the command list on the desktop",
+  "editNotes": "Edit notes",
+  "enableGyroMouse": "Enable gyroscope mouse",
+  "encryptedConnection": "Encrypted connection (TLS)",
+  "encryptionDisconnectedBody": "Connect the device first to see the encryption details of this channel.",
+  "encryptionInfo": "Encryption info",
+  "encryptionPairedBody": "This device is paired. Every packet travels over TLS with self-signed certificates that were exchanged during pairing.",
+  "encryptionUnpairedBody": "The TLS channel is up, but this device is not paired yet. Pair first so its certificate becomes trusted.",
+  "fileSendFailed": "Failed to send file: {error}",
+  "@fileSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "fileSent": "Sent: {name}",
+  "@fileSent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "forward10": "Forward 10 seconds",
+  "fullscreen": "Fullscreen",
+  "functionKeys": "Function keys F1 to F12",
+  "gyroSensitivity": "Gyroscope sensitivity",
+  "howPairingWorksBody": "Each device creates its own certificate, signed by no authority. Trust is built once during pairing: the verification key above is computed from both devices' public keys, and you compare it on both sides before tapping Accept. After that the peer certificate is stored and later connections are trusted automatically.",
+  "howPairingWorksTitle": "How pairing works",
+  "keyboard": "Keyboard",
+  "log": "Log",
+  "menu": "Menu",
+  "next": "Next",
+  "nextSlideNotes": "Next slide notes",
+  "noAudioDeviceFound": "No audio device found",
+  "noCommandsYet": "The desktop has no commands to run yet.\nAdd them through the editor on the desktop.",
+  "noConnection": "No connection to this device.",
+  "noDeviceOnNetwork": "No device on this network yet",
+  "noPairedDeviceBody": "Open the sidebar and choose Pair new device to connect your first desktop.",
+  "noPairedDeviceTitle": "No device paired yet.",
+  "noPlayerFound": "No player found",
+  "notConnected": "Not connected",
+  "notLoaded": "Not loaded yet",
+  "notesHint": "Notes for this slide",
+  "openNotesFile": "Open notes file",
+  "openingCommandEditor": "Opening the command editor on the desktop",
+  "pairFirst": "Pair with {device} first to use {title}.",
+  "@pairFirst": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      },
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "pairNewDevice": "Pair new device",
+  "pairingRequest": "Pairing request",
+  "pairingRequestBody": "The desktop is asking to pair. Match this key with the one shown on the desktop, then tap Accept.",
+  "pasteFromClipboard": "Paste from clipboard",
+  "pause": "Pause",
+  "peerDevice": "Peer device",
+  "pingSent": "Ping sent to {name}.",
+  "@pingSent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "play": "Play",
+  "pluginBattery": "Battery",
+  "pluginBatteryDesc": "Send this phone's battery status to the desktop.",
+  "pluginClipboard": "Clipboard",
+  "pluginClipboardDesc": "Send and receive clipboard contents with the desktop.",
+  "pluginClipboardTile": "Send clipboard",
+  "pluginDisabledSnack": "The {title} plugin is off. Enable it in Plugin settings.",
+  "@pluginDisabledSnack": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "pluginFindMyPhone": "Find my phone",
+  "pluginFindMyPhoneDesc": "Ring this phone from the desktop.",
+  "pluginMpris": "Multimedia control",
+  "pluginMprisDesc": "Play, pause, and switch tracks on the desktop.",
+  "pluginMprisTile": "Multimedia control",
+  "pluginNotification": "Notifications",
+  "pluginNotificationDesc": "Show desktop notifications on this phone.",
+  "pluginPresenter": "Presentation remote",
+  "pluginPresenterDesc": "Control presentations and point with the pointer.",
+  "pluginPresenterTile": "Presentation remote",
+  "pluginRemoteInput": "Remote input",
+  "pluginRemoteInputDesc": "Touchpad and keyboard for the desktop.",
+  "pluginRemoteInputTile": "Remote input",
+  "pluginRunCommand": "Run commands",
+  "pluginRunCommandDesc": "Run commands on the desktop and see their output.",
+  "pluginRunCommandTile": "Run Commands",
+  "pluginSettingsHeader": "Plugins for {device}. Changes apply when the device reconnects.",
+  "@pluginSettingsHeader": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "pluginSettingsTitle": "Plugin settings",
+  "pluginSftp": "Browse files (SFTP)",
+  "pluginSftpDesc": "Access desktop files over SFTP.",
+  "pluginShare": "Send file",
+  "pluginShareDesc": "Send files to the desktop and receive files from it.",
+  "pluginShareTile": "Send file",
+  "pluginSystemVolume": "System volume",
+  "pluginSystemVolumeDesc": "Control the desktop speaker volume.",
+  "previous": "Previous",
+  "previousSlideNotes": "Previous slide notes",
+  "receivedFilesFolder": "Received files folder",
+  "refresh": "Refresh",
+  "reject": "Reject",
+  "reloadList": "Reload list",
+  "remoteInputSettingsTitle": "Remote Input settings",
+  "requestPairing": "Request pairing",
+  "reverseScrollDirection": "Reverse scroll direction",
+  "rewind10": "Back 10 seconds",
+  "sameWifiHint": "Make sure the desktop and this phone are on the same Wi-Fi.",
+  "scrollSensitivity": "Scroll sensitivity",
+  "send": "Send",
+  "sendPing": "Send ping",
+  "sendText": "Send text",
+  "sendingFile": "Sending file",
+  "sensDefault": "Default",
+  "sensFast": "Fast",
+  "sensSlow": "Slow",
+  "setPointerAcceleration": "Set pointer acceleration",
+  "setTapActionOne": "Set one-finger tap action",
+  "setTapActionThree": "Set three-finger tap action",
+  "setTapActionTwo": "Set two-finger tap action",
+  "setTouchpadSensitivity": "Set touchpad sensitivity",
+  "settings": "Settings",
+  "showMouseButtons": "Show mouse buttons",
+  "slideNotes": "Slide notes",
+  "statusConnectedPaired": "Connected, paired",
+  "statusConnectedUnpaired": "Connected, not paired",
+  "statusDiscovered": "Discovered",
+  "statusOffline": "Offline",
+  "statusPairRequestCheckKey": "Pairing requested, check the key",
+  "stop": "Stop",
+  "stopCommands": "Stop commands",
+  "tapCommandHint": "Tap a command below to run it.",
+  "tapLeft": "Left click",
+  "tapMiddle": "Middle click",
+  "tapNone": "None",
+  "tapRight": "Right click",
+  "textToTypeLabel": "Text to type on the desktop",
+  "thisDevice": "This device",
+  "touchpadHint": "Drag one finger on the screen to move the mouse cursor. Tap to click, and use two or three fingers for the right and middle buttons. Use 2 fingers to scroll. Double tap to drag and drop. The gyroscope mouse can be enabled from the remote input settings",
+  "typeFieldHint": "Typed characters are sent immediately",
+  "typeHere": "Type here",
+  "unknownNotConnected": "Unknown (not connected)",
+  "unknownUntilPairing": "Unknown (appears during pairing)",
+  "unpair": "Unpair",
+  "unpairBody": "Pairing with {device} will be removed and its certificate deleted from this phone. To use this device again, pairing must be repeated from scratch.",
+  "@unpairBody": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "unpairTitle": "Unpair?",
+  "unpaired": "Pairing removed.",
+  "verificationKey": "Verification key",
+  "versionLabel": "Version {version}",
+  "@versionLabel": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "waitingForDesktop": "Waiting to be accepted on the desktop",
+  "waitingForDesktopBody": "The pairing request has been sent. Match this key with the one shown on the desktop, then tap Accept there.",
+  "waitingForPlayer": "Waiting for player status from the desktop..."
+}

@@ -7,6 +7,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:hyprconnect_mobile/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hyprconnect_mobile/src/protocol/protocol.dart';
 import 'package:hyprconnect_mobile/src/settings/plugin_settings.dart';
@@ -50,23 +51,35 @@ Future<DeviceConnection> _fakeConn(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('no connection is stated, empty list explains itself',
-      (tester) async {
+  testWidgets('no connection is stated, empty list explains itself', (
+    tester,
+  ) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
-      MaterialApp(home: MultimediaPage(appState: state, entry: _entry())),
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
+        home: MultimediaPage(appState: state, entry: _entry()),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Tidak ada koneksi ke perangkat ini.'), findsOneWidget);
   });
 
-  testWidgets('connected with no players shows the empty state',
-      (tester) async {
+  testWidgets('connected with no players shows the empty state', (
+    tester,
+  ) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     final conn = await _fakeConn(tester);
     state.registerTestConnection(conn);
     await tester.pumpWidget(
-      MaterialApp(home: MultimediaPage(appState: state, entry: _entry())),
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
+        home: MultimediaPage(appState: state, entry: _entry()),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Tidak ada pemutar yang ditemukan'), findsOneWidget);
@@ -84,8 +97,9 @@ void main() {
     expect(play.onPressed, isNull);
   });
 
-  testWidgets('player list and state render the now-playing card',
-      (tester) async {
+  testWidgets('player list and state render the now-playing card', (
+    tester,
+  ) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     final conn = await _fakeConn(tester);
     await tester.runAsync(
@@ -126,7 +140,12 @@ void main() {
     // With the connection registered, the page renders the card.
     state.registerTestConnection(conn);
     await tester.pumpWidget(
-      MaterialApp(home: MultimediaPage(appState: state, entry: _entry())),
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
+        home: MultimediaPage(appState: state, entry: _entry()),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Lagu Tes'), findsOneWidget);
@@ -141,8 +160,10 @@ void main() {
     // No sinks were fed, so Peranti states that honestly.
     await tester.tap(find.text('Peranti'));
     await tester.pumpAndSettle();
-    expect(find.text('Tidak ada perangkat audio yang ditemukan'),
-        findsOneWidget);
+    expect(
+      find.text('Tidak ada perangkat audio yang ditemukan'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Putar'));
     await tester.pumpAndSettle();
     // Pause is offered while playing; tapping it sends the action
@@ -152,8 +173,9 @@ void main() {
     expect(find.text('Lagu Tes'), findsOneWidget);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
-  testWidgets('sink list renders on Peranti and updates incrementally',
-      (tester) async {
+  testWidgets('sink list renders on Peranti and updates incrementally', (
+    tester,
+  ) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     final conn = await _fakeConn(tester);
     await tester.runAsync(
@@ -193,7 +215,12 @@ void main() {
 
     state.registerTestConnection(conn);
     await tester.pumpWidget(
-      MaterialApp(home: MultimediaPage(appState: state, entry: _entry())),
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
+        home: MultimediaPage(appState: state, entry: _entry()),
+      ),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Peranti'));
@@ -201,8 +228,9 @@ void main() {
     expect(find.text('Built-in Audio Analog Stereo'), findsOneWidget);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
-  testWidgets('state updates replace the previous player state',
-      (tester) async {
+  testWidgets('state updates replace the previous player state', (
+    tester,
+  ) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     final conn = await _fakeConn(tester);
     Future<void> feed(Map<String, dynamic> body) {
@@ -214,7 +242,9 @@ void main() {
       );
     }
 
-    await feed({'playerList': ['mpv', 'spotify']});
+    await feed({
+      'playerList': ['mpv', 'spotify'],
+    });
     expect(state.playerListFor(_deviceId), ['mpv', 'spotify']);
     expect(state.selectedPlayerFor(_deviceId), 'mpv');
     await feed({'player': 'mpv', 'title': 'Satu', 'isPlaying': true});
@@ -222,9 +252,7 @@ void main() {
     expect(state.playerStateFor(_deviceId, 'mpv')?.title, 'Dua');
     expect(state.playerStateFor(_deviceId, 'mpv')?.isPlaying, isFalse);
     // Selecting the other player sticks.
-    await tester.runAsync(
-      () => state.selectMprisPlayer(_deviceId, 'spotify'),
-    );
+    await tester.runAsync(() => state.selectMprisPlayer(_deviceId, 'spotify'));
     expect(state.selectedPlayerFor(_deviceId), 'spotify');
   }, timeout: const Timeout(Duration(seconds: 30)));
 }

@@ -192,8 +192,7 @@ void main() {
       await channel.setPresenterMonitor('DP-1');
       final pinned = await _waitUntil(
         () async =>
-            replies.isNotEmpty &&
-            replies.last.presenterMonitor == 'DP-1',
+            replies.isNotEmpty && replies.last.presenterMonitor == 'DP-1',
         timeout: const Duration(seconds: 15),
       );
       expect(pinned, isTrue, reason: 'daemon tidak mengonfirmasi DP-1');
@@ -208,8 +207,7 @@ void main() {
       replies.clear();
       await channel.setPresenterMonitor(null);
       final auto = await _waitUntil(
-        () async =>
-            replies.isNotEmpty && replies.last.presenterMonitor == null,
+        () async => replies.isNotEmpty && replies.last.presenterMonitor == null,
         timeout: const Duration(seconds: 15),
       );
       expect(auto, isTrue, reason: 'daemon tidak mengonfirmasi otomatis');

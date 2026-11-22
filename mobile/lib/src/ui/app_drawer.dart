@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
 import 'about_page.dart';
 import 'app_state.dart';
 import 'pair_new_page.dart';
@@ -78,7 +79,7 @@ class AppDrawer extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Text(
-                'Peranti',
+                context.l10n.devices,
                 style: Theme.of(context).textTheme.titleSmall
                     ?.copyWith(color: colorScheme.onSurfaceVariant),
               ),
@@ -104,7 +105,7 @@ class AppDrawer extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
                 child: ListTile(
                   leading: const Icon(Icons.add_circle_outline),
-                  title: const Text('Sandingkan peranti baru'),
+                  title: Text(context.l10n.pairNewDevice),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(24),
                   ),
@@ -115,12 +116,12 @@ class AppDrawer extends StatelessWidget {
             const Divider(),
             ListTile(
               leading: const Icon(Icons.settings),
-              title: const Text('Pengaturan'),
+              title: Text(context.l10n.settings),
               onTap: () => _push(context, SettingsPage(appState: appState)),
             ),
             ListTile(
               leading: const Icon(Icons.info),
-              title: const Text('Tentang'),
+              title: Text(context.l10n.about),
               onTap: () => _push(context, const AboutPage()),
             ),
           ],

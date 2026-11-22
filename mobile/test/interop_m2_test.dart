@@ -63,7 +63,9 @@ void main() {
   test('M2: share and clipboard against the real daemon', () async {
     final ss = await Process.run('ss', ['-ltn']);
     if (!(ss.stdout as String).contains(':$_daemonPort ')) {
-      markTestSkipped('daemon hyprconnect tidak jalan di $_daemonHost:$_daemonPort');
+      markTestSkipped(
+        'daemon hyprconnect tidak jalan di $_daemonHost:$_daemonPort',
+      );
       return;
     }
 
@@ -188,14 +190,14 @@ void main() {
       // inherits the parent's stdout/stderr, so a plain Process.run
       // waits forever for EOF on the pipes. Launch it detached with
       // stdio to /dev/null instead (the daemon still sees the change).
-      final wlCopy = await Process.run('sh', [
-        '-c',
-        'wl-copy "\$0" >/dev/null 2>&1 < /dev/null &',
-        pulledText,
-      ], environment: {
-        'WAYLAND_DISPLAY': 'wayland-1',
-        'XDG_RUNTIME_DIR': '/run/user/1000',
-      });
+      final wlCopy = await Process.run(
+        'sh',
+        ['-c', 'wl-copy "\$0" >/dev/null 2>&1 < /dev/null &', pulledText],
+        environment: {
+          'WAYLAND_DISPLAY': 'wayland-1',
+          'XDG_RUNTIME_DIR': '/run/user/1000',
+        },
+      );
       expect(wlCopy.exitCode, 0, reason: 'wl-copy gagal: ${wlCopy.stderr}');
       final pulled = await clipPulled.timeout(const Duration(seconds: 20));
       expect(pulled.body['content'], pulledText);

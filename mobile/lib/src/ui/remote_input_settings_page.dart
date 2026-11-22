@@ -10,6 +10,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
+import '../../l10n/l10n.dart';
 import '../settings/remote_input_prefs.dart';
 import 'app_state.dart';
 
@@ -75,72 +77,72 @@ class RemoteInputSettingsPage extends StatelessWidget {
         }
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Pengaturan Masukan jarak jauh')),
+          appBar: AppBar(title: Text(context.l10n.remoteInputSettingsTitle)),
           body: ListView(
             children: [
               dropdownRow<TapAction>(
-                'Setel aksi ketuk satu jari',
+                context.l10n.setTapActionOne,
                 prefs.tapOne,
                 TapAction.values,
-                (v) => v.label,
+                (v) => tapActionLabel(context.l10n, v),
                 (v) => update((p) => p.tapOne = v),
               ),
               dropdownRow<TapAction>(
-                'Setel aksi ketuk dua jari',
+                context.l10n.setTapActionTwo,
                 prefs.tapTwo,
                 TapAction.values,
-                (v) => v.label,
+                (v) => tapActionLabel(context.l10n, v),
                 (v) => update((p) => p.tapTwo = v),
               ),
               dropdownRow<TapAction>(
-                'Setel aksi ketuk tiga jari',
+                context.l10n.setTapActionThree,
                 prefs.tapThree,
                 TapAction.values,
-                (v) => v.label,
+                (v) => tapActionLabel(context.l10n, v),
                 (v) => update((p) => p.tapThree = v),
               ),
               dropdownRow<SensitivityPreset>(
-                'Setel kepekaan touchpad',
+                context.l10n.setTouchpadSensitivity,
                 prefs.sensitivity,
                 SensitivityPreset.values,
-                (v) => v.label,
+                (v) => sensitivityLabel(context.l10n, v),
                 (v) => update((p) => p.sensitivity = v),
               ),
               dropdownRow<AccelerationPreset>(
-                'Setel akselerasi pointer',
+                context.l10n.setPointerAcceleration,
                 prefs.acceleration,
                 AccelerationPreset.values,
-                (v) => v.label,
+                (v) => accelerationLabel(context.l10n, v),
                 (v) => update((p) => p.acceleration = v),
               ),
               SwitchListTile(
-                title: const Text('Arah Menggulir Terbalik'),
+                title: Text(context.l10n.reverseScrollDirection),
                 value: prefs.reverseScroll,
                 onChanged: (v) => update((p) => p.reverseScroll = v),
               ),
               sliderRow(
-                'Scroll sensitivity',
+                context.l10n.scrollSensitivity,
                 prefs.scrollSensitivity,
                 (v) => update((p) => p.scrollSensitivity = v),
               ),
               SwitchListTile(
-                title: const Text('Aktifkan tetikus giroskop'),
+                title: Text(context.l10n.enableGyroMouse),
                 value: prefs.gyroEnabled,
                 onChanged: (v) => update((p) => p.gyroEnabled = v),
               ),
               sliderRow(
-                'Gyroscope sensitivity',
+                context.l10n.gyroSensitivity,
                 prefs.gyroSensitivity,
                 (v) => update((p) => p.gyroSensitivity = v),
               ),
               SwitchListTile(
-                title: const Text('Tampilkan tombol tetikus'),
+                title: Text(context.l10n.showMouseButtons),
                 value: prefs.showMouseButtons,
                 onChanged: (v) => update((p) => p.showMouseButtons = v),
               ),
               SwitchListTile(
-                title: const Text('Drag and drop behavior'),
-                subtitle: const Text('Ketuk dua kali untuk drag'),
+                title: Text(context.l10n.dragAndDropBehavior),
+                subtitle: Text(context.l10n.doubleTapToDrag),
                 value: prefs.doubleTapDrag,
                 onChanged: (v) => update((p) => p.doubleTapDrag = v),
               ),
@@ -151,3 +153,27 @@ class RemoteInputSettingsPage extends StatelessWidget {
     );
   }
 }
+
+/// Localized labels for the remote-input enums; the enums keep
+/// English source labels, the settings page resolves through here.
+String tapActionLabel(AppLocalizations l, TapAction action) => switch (action) {
+  TapAction.left => l.tapLeft,
+  TapAction.right => l.tapRight,
+  TapAction.middle => l.tapMiddle,
+  TapAction.none => l.tapNone,
+};
+
+String sensitivityLabel(AppLocalizations l, SensitivityPreset preset) =>
+    switch (preset) {
+      SensitivityPreset.slow => l.sensSlow,
+      SensitivityPreset.standard => l.sensDefault,
+      SensitivityPreset.fast => l.sensFast,
+    };
+
+String accelerationLabel(AppLocalizations l, AccelerationPreset preset) =>
+    switch (preset) {
+      AccelerationPreset.off => l.accelOff,
+      AccelerationPreset.low => l.accelLow,
+      AccelerationPreset.medium => l.accelMedium,
+      AccelerationPreset.high => l.accelHigh,
+    };

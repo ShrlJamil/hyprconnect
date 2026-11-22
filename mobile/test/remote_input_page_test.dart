@@ -11,6 +11,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:hyprconnect_mobile/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hyprconnect_mobile/src/protocol/protocol.dart';
 import 'package:hyprconnect_mobile/src/settings/plugin_settings.dart';
@@ -90,6 +91,9 @@ Future<(_RecordingConnection, AppState)> _pumpedState(
   state.registerTestConnection(conn);
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('id'),
       home: RemoteInputPage(appState: state, entry: _entry()),
     ),
   );
@@ -104,6 +108,9 @@ void main() {
     final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
         home: RemoteInputPage(appState: state, entry: _entry()),
       ),
     );
@@ -260,7 +267,10 @@ void main() {
     );
     await tester.tap(find.descendant(of: tile, matching: find.byType(Switch)));
     await tester.pumpAndSettle();
-    await tester.pageBack();
+    // pageBack() looks up the English 'Back' tooltip; under the
+    // Indonesian test locale the framework tooltip is 'Kembali',
+    // so tap the BackButton widget itself.
+    await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('mouse-left')), findsNothing);
   });

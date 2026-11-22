@@ -14,6 +14,7 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
 import '../protocol/protocol.dart';
 import '../settings/plugin_settings.dart';
 import 'app_state.dart';
@@ -23,6 +24,7 @@ import 'multimedia_page.dart';
 import 'runcommand_page.dart';
 import 'remote_input_page.dart';
 import 'plugin_settings_page.dart';
+import 'plugin_text.dart';
 import 'presenter_page.dart';
 
 IconData _tileIcon(String pluginId) {
@@ -83,7 +85,7 @@ class _DevicePageState extends State<DevicePage> {
     final outcome = await _appState.connectTo(_entry);
     if (!mounted) return;
     if (outcome == ConnectOutcome.failed) {
-      _snack('Gagal terhubung. Cek log di halaman utama.');
+      _snack(context.l10n.connectFailed);
       return;
     }
     // One tap does the whole first pairing: with the channel up, ask
@@ -101,27 +103,23 @@ class _DevicePageState extends State<DevicePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Leraikan pairing?'),
-        content: Text(
-          'Pairing dengan ${_entry.name} akan dilepas dan sertifikatnya '
-          'dihapus dari HP ini. Untuk memakai perangkat ini lagi, '
-          'pairing harus diulang dari awal.',
-        ),
+        title: Text(context.l10n.unpairTitle),
+        content: Text(context.l10n.unpairBody(_entry.name)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Batal'),
+            child: Text(context.l10n.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Leraikan'),
+            child: Text(context.l10n.unpair),
           ),
         ],
       ),
     );
     if (confirmed == true) {
       await _appState.unpair(_entry.deviceId);
-      if (mounted) _snack('Pairing dilepas.');
+      if (mounted) _snack(context.l10n.unpaired);
     }
   }
 
@@ -144,7 +142,7 @@ class _DevicePageState extends State<DevicePage> {
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
-          title: const Text('Mengirim file'),
+          title: Text(context.l10n.sendingFile),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -173,11 +171,11 @@ class _DevicePageState extends State<DevicePage> {
       );
       if (!mounted) return;
       Navigator.of(context).pop();
-      _snack('Terkirim: ${picked.name}');
+      _snack(context.l10n.fileSent(picked.name));
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop();
-      _snack('Gagal mengirim file: $e');
+      _snack(context.l10n.fileSendFailed('$e'));
     }
   }
 
@@ -188,17 +186,15 @@ class _DevicePageState extends State<DevicePage> {
       final text = await _appState.readClipboardText();
       if (!mounted) return;
       if (text == null || text.isEmpty) {
-        _snack('Papan klip kosong atau bukan teks.');
+        _snack(context.l10n.clipboardEmpty);
         return;
       }
       final sent = await _appState.sendClipboard(_entry.deviceId, text);
       if (!mounted) return;
-      _snack(
-        sent ? 'Papan klip terkirim' : 'Tidak ada koneksi ke perangkat ini.',
-      );
+      _snack(sent ? context.l10n.clipboardSent : context.l10n.noConnection);
     } catch (e) {
       if (!mounted) return;
-      _snack('Gagal mengirim papan klip: $e');
+      _snack(context.l10n.clipboardSendFailed('$e'));
     }
   }
 
@@ -206,11 +202,11 @@ class _DevicePageState extends State<DevicePage> {
     final conn = _appState.connectionFor(_entry.deviceId);
     final paired = conn?.isPaired ?? false;
     if (!paired) {
-      _snack('Pair dulu dengan ${_entry.name} untuk memakai $title.');
+      _snack(context.l10n.pairFirst(_entry.name, title));
       return;
     }
     if (!_appState.pluginSettings.isEnabled(_entry.deviceId, pluginId)) {
-      _snack('Plugin $title nonaktif. Aktifkan di Pengesetan plugin.');
+      _snack(context.l10n.pluginDisabledSnack(title));
       return;
     }
     if (pluginId == 'share') {
@@ -264,7 +260,7 @@ class _DevicePageState extends State<DevicePage> {
           icon: _tileIcon(pluginId),
           title: title,
           phase: plugin?.tilePhase ?? '?',
-          description: plugin?.description ?? '',
+          description: pluginDescription(context.l10n, pluginId),
         ),
       ),
     );
@@ -290,20 +286,20 @@ class _DevicePageState extends State<DevicePage> {
                 ? Builder(
                     builder: (context) => IconButton(
                       icon: const Icon(Icons.menu),
-                      tooltip: 'Peranti',
+                      tooltip: context.l10n.devices,
                       onPressed: () => Scaffold.of(context).openDrawer(),
                     ),
                   )
                 : null,
             actions: [
               PopupMenuButton<String>(
-                tooltip: 'Menu perangkat',
+                tooltip: context.l10n.deviceMenu,
                 onSelected: (value) async {
                   switch (value) {
                     case 'ping':
                       await _appState.sendPing(_entry.deviceId);
                       if (context.mounted) {
-                        _snack('Ping terkirim ke $name.');
+                        _snack(context.l10n.pingSent(name));
                       }
                     case 'plugins':
                       if (!context.mounted) return;
@@ -333,20 +329,20 @@ class _DevicePageState extends State<DevicePage> {
                   PopupMenuItem(
                     value: 'ping',
                     enabled: paired,
-                    child: const Text('Kirim ping'),
+                    child: Text(context.l10n.sendPing),
                   ),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'plugins',
-                    child: Text('Pengesetan plugin'),
+                    child: Text(context.l10n.pluginSettingsTitle),
                   ),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'encryption',
-                    child: Text('Info Enkripsi'),
+                    child: Text(context.l10n.encryptionInfo),
                   ),
                   PopupMenuItem(
                     value: 'unpair',
                     enabled: paired,
-                    child: const Text('Leraikan'),
+                    child: Text(context.l10n.unpair),
                   ),
                 ],
               ),
@@ -365,14 +361,11 @@ class _DevicePageState extends State<DevicePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Permintaan pairing',
+                          context.l10n.pairingRequest,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Desktop meminta pairing. Cocokkan kunci ini '
-                          'dengan yang tampil di desktop, lalu tekan Terima.',
-                        ),
+                        Text(context.l10n.pairingRequestBody),
                         const SizedBox(height: 12),
                         Center(
                           child: SelectableText(
@@ -388,7 +381,7 @@ class _DevicePageState extends State<DevicePage> {
                               child: FilledButton(
                                 onPressed: () =>
                                     _appState.requestPair(_entry.deviceId),
-                                child: const Text('Terima'),
+                                child: Text(context.l10n.accept),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -396,7 +389,7 @@ class _DevicePageState extends State<DevicePage> {
                               child: OutlinedButton(
                                 onPressed: () =>
                                     _appState.rejectPair(_entry.deviceId),
-                                child: const Text('Tolak'),
+                                child: Text(context.l10n.reject),
                               ),
                             ),
                           ],
@@ -410,7 +403,11 @@ class _DevicePageState extends State<DevicePage> {
                 const SizedBox(height: 8),
                 FilledButton(
                   onPressed: _entry.online ? _connect : null,
-                  child: Text(_entry.online ? 'Hubungkan' : 'Perangkat luring'),
+                  child: Text(
+                    _entry.online
+                        ? context.l10n.connect
+                        : context.l10n.deviceOffline,
+                  ),
                 ),
               ],
               if (pendingOut && conn != null) ...[
@@ -423,15 +420,11 @@ class _DevicePageState extends State<DevicePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Menunggu diterima di desktop',
+                          context.l10n.waitingForDesktop,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Permintaan pairing sudah terkirim. Cocokkan '
-                          'kunci ini dengan yang tampil di desktop, lalu '
-                          'tekan Terima di sana.',
-                        ),
+                        Text(context.l10n.waitingForDesktopBody),
                         const SizedBox(height: 12),
                         Center(
                           child: SelectableText(
@@ -444,7 +437,7 @@ class _DevicePageState extends State<DevicePage> {
                         OutlinedButton(
                           onPressed: () =>
                               _appState.rejectPair(_entry.deviceId),
-                          child: const Text('Batalkan permintaan'),
+                          child: Text(context.l10n.cancelRequest),
                         ),
                       ],
                     ),
@@ -455,7 +448,7 @@ class _DevicePageState extends State<DevicePage> {
                 const SizedBox(height: 8),
                 FilledButton(
                   onPressed: () => _appState.requestPair(_entry.deviceId),
-                  child: const Text('Minta pairing'),
+                  child: Text(context.l10n.requestPairing),
                 ),
               ],
               const SizedBox(height: 16),
@@ -470,12 +463,15 @@ class _DevicePageState extends State<DevicePage> {
                   for (final tile in deviceTiles)
                     _FeatureTile(
                       icon: _tileIcon(tile.pluginId),
-                      title: tile.title,
+                      title: pluginTileTitle(context.l10n, tile.pluginId),
                       enabled: _appState.pluginSettings.isEnabled(
                         _entry.deviceId,
                         tile.pluginId,
                       ),
-                      onTap: () => _onTileTap(tile.pluginId, tile.title),
+                      onTap: () => _onTileTap(
+                        tile.pluginId,
+                        pluginTileTitle(context.l10n, tile.pluginId),
+                      ),
                     ),
                 ],
               ),

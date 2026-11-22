@@ -92,10 +92,7 @@ void main() {
       'file:///home/jyameel/.cache/cover.jpg',
     );
     expect(packet.body['player'], 'mpv');
-    expect(
-      packet.body['albumArtUrl'],
-      'file:///home/jyameel/.cache/cover.jpg',
-    );
+    expect(packet.body['albumArtUrl'], 'file:///home/jyameel/.cache/cover.jpg');
   });
 
   test('state packet parses the full daemon shape', () {
@@ -184,8 +181,7 @@ void main() {
       );
       await connA.sendMprisAction('mpv', 'PlayPause');
       expect(
-        (await actionSeen.timeout(const Duration(seconds: 10)))
-            .body['player'],
+        (await actionSeen.timeout(const Duration(seconds: 10))).body['player'],
         'mpv',
       );
     } finally {

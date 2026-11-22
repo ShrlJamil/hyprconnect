@@ -5,6 +5,8 @@
 
 import 'package:flutter/material.dart';
 
+import 'l10n/app_localizations.dart';
+import 'l10n/l10n.dart';
 import 'src/ui/app_drawer.dart';
 import 'src/ui/app_state.dart';
 import 'src/ui/device_page.dart';
@@ -20,6 +22,8 @@ class HyprConnectApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'HyprConnect',
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
@@ -92,13 +96,13 @@ class _HomePageState extends State<HomePage> {
               leading: Builder(
                 builder: (context) => IconButton(
                   icon: const Icon(Icons.menu),
-                  tooltip: 'Peranti',
+                  tooltip: context.l10n.devices,
                   onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
             ),
             drawer: drawer,
-            body: const Center(
+            body: Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Column(
@@ -107,13 +111,12 @@ class _HomePageState extends State<HomePage> {
                     Icon(Icons.devices, size: 56),
                     SizedBox(height: 12),
                     Text(
-                      'Belum ada peranti yang disandingkan.',
+                      context.l10n.noPairedDeviceTitle,
                       textAlign: TextAlign.center,
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(
-                      'Buka sidebar lalu pilih Sandingkan peranti baru '
-                      'untuk menghubungkan desktop pertamamu.',
+                      context.l10n.noPairedDeviceBody,
                       textAlign: TextAlign.center,
                     ),
                   ],

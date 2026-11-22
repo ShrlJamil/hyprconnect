@@ -76,24 +76,12 @@ void main() {
   test('uniqueFilePath deduplicates like the daemon', () async {
     final dir = await Directory.systemTemp.createTemp('hyprconnect-m2-');
     try {
-      expect(
-        uniqueFilePath(dir, 'a.txt'),
-        '${dir.path}/a.txt',
-      );
+      expect(uniqueFilePath(dir, 'a.txt'), '${dir.path}/a.txt');
       await File('${dir.path}/a.txt').writeAsString('x');
-      expect(
-        uniqueFilePath(dir, 'a.txt'),
-        '${dir.path}/a (1).txt',
-      );
+      expect(uniqueFilePath(dir, 'a.txt'), '${dir.path}/a (1).txt');
       await File('${dir.path}/a (1).txt').writeAsString('x');
-      expect(
-        uniqueFilePath(dir, 'a.txt'),
-        '${dir.path}/a (2).txt',
-      );
-      expect(
-        uniqueFilePath(dir, '../evil.txt'),
-        '${dir.path}/evil.txt',
-      );
+      expect(uniqueFilePath(dir, 'a.txt'), '${dir.path}/a (2).txt');
+      expect(uniqueFilePath(dir, '../evil.txt'), '${dir.path}/evil.txt');
     } finally {
       await dir.delete(recursive: true);
     }
@@ -121,8 +109,7 @@ void main() {
     }
   });
 
-  test('payload round-trip: A serves a file, B downloads it',
-      () async {
+  test('payload round-trip: A serves a file, B downloads it', () async {
     final dirA = await Directory.systemTemp.createTemp('hyprconnect-m2-a-');
     final dirB = await Directory.systemTemp.createTemp('hyprconnect-m2-b-');
     DeviceConnection? connA;
@@ -183,10 +170,7 @@ void main() {
           .timeout(const Duration(seconds: 10));
       await sendBack.timeout(const Duration(seconds: 10));
       expect(receivedBack.filename, 'balik.bin');
-      expect(
-        await File(receivedBack.path).readAsBytes(),
-        back,
-      );
+      expect(await File(receivedBack.path).readAsBytes(), back);
     } finally {
       await connA?.close();
       await connB?.close();

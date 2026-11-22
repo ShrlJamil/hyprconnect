@@ -4,6 +4,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
+
 class FeaturePlaceholderPage extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -40,13 +42,11 @@ class FeaturePlaceholderPage extends StatelessWidget {
             style: Theme.of(context).textTheme.bodyLarge,
           ),
           const SizedBox(height: 24),
-          Center(
-            child: Chip(label: Text('Hadir di fase $phase')),
-          ),
+          Center(child: Chip(label: Text(context.l10n.arrivesInPhase(phase)))),
           const SizedBox(height: 24),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Kembali'),
+            child: Text(context.l10n.back),
           ),
         ],
       ),

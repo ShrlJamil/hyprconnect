@@ -1,0 +1,231 @@
+{
+  "@@locale": "id",
+  "about": "Tentang",
+  "aboutBody": "Aplikasi pendamping daemon HyprConnect di desktop. Memakai protokol KDE Connect, jadi tetap bisa berkomunikasi dengan KDE Connect bawaan di desktop maupun HP lain.",
+  "accelHigh": "Tinggi",
+  "accelLow": "Rendah",
+  "accelMedium": "Menengah",
+  "accelOff": "Mati",
+  "accept": "Terima",
+  "addSlide": "Tambah slide",
+  "arrivesInPhase": "Hadir di fase {phase}",
+  "@arrivesInPhase": {
+    "placeholders": {
+      "phase": {
+        "type": "String"
+      }
+    }
+  },
+  "automatic": "Otomatis",
+  "back": "Kembali",
+  "cancel": "Batal",
+  "cancelRequest": "Batalkan permintaan",
+  "certFingerprint": "Sidik jari sertifikat (SHA-256)",
+  "clipboardEmpty": "Papan klip kosong atau bukan teks.",
+  "clipboardSendFailed": "Gagal mengirim papan klip: {error}",
+  "@clipboardSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "clipboardSent": "Papan klip terkirim",
+  "connect": "Hubungkan",
+  "connectFailed": "Gagal terhubung. Cek log di Pengaturan.",
+  "copy": "Salin",
+  "createNotes": "Buat catatan",
+  "deviceIdLabel": "ID perangkat",
+  "deviceMenu": "Menu perangkat",
+  "deviceOffline": "Perangkat luring",
+  "devices": "Peranti",
+  "doubleTapToDrag": "Ketuk dua kali untuk drag",
+  "dragAndDropBehavior": "Drag and drop behavior",
+  "editCommandsOnDesktop": "Ubah daftar perintah di desktop",
+  "editNotes": "Ubah catatan",
+  "enableGyroMouse": "Aktifkan tetikus giroskop",
+  "encryptedConnection": "Koneksi terenkripsi (TLS)",
+  "encryptionDisconnectedBody": "Hubungkan perangkat dulu untuk melihat detail enkripsi kanal ini.",
+  "encryptionInfo": "Info Enkripsi",
+  "encryptionPairedBody": "Perangkat ini sudah dipair. Semua paket berjalan di atas TLS dengan sertifikat self-signed yang saling dikenali saat pairing.",
+  "encryptionUnpairedBody": "Kanal TLS sudah naik, tapi perangkat ini belum dipair. Pair dulu supaya sertifikatnya dipercaya.",
+  "fileSendFailed": "Gagal mengirim file: {error}",
+  "@fileSendFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "fileSent": "Terkirim: {name}",
+  "@fileSent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "forward10": "Maju 10 detik",
+  "fullscreen": "Layar penuh",
+  "functionKeys": "Tombol fungsi F1 sampai F12",
+  "gyroSensitivity": "Sensitivitas giroskop",
+  "howPairingWorksBody": "Sertifikat dibuat sendiri oleh tiap perangkat dan tidak ditandatangani otoritas mana pun. Kepercayaan dibangun sekali saat pairing: kunci verifikasi di atas dihitung dari kunci publik kedua perangkat, dan kamu membandingkannya di kedua sisi sebelum menekan Terima. Setelah itu sertifikat lawan disimpan dan koneksi berikutnya otomatis terpercaya.",
+  "howPairingWorksTitle": "Cara kerja pairing",
+  "keyboard": "Keyboard",
+  "log": "Log",
+  "menu": "Menu",
+  "next": "Berikutnya",
+  "nextSlideNotes": "Catatan slide berikutnya",
+  "noAudioDeviceFound": "Tidak ada perangkat audio yang ditemukan",
+  "noCommandsYet": "Desktop belum punya perintah yang bisa dijalankan.\nTambah lewat editor di desktop.",
+  "noConnection": "Tidak ada koneksi ke perangkat ini.",
+  "noDeviceOnNetwork": "Belum ada perangkat di jaringan ini",
+  "noPairedDeviceBody": "Buka sidebar lalu pilih Sandingkan peranti baru untuk menghubungkan desktop pertamamu.",
+  "noPairedDeviceTitle": "Belum ada peranti yang disandingkan.",
+  "noPlayerFound": "Tidak ada pemutar yang ditemukan",
+  "notConnected": "Belum terhubung",
+  "notLoaded": "Belum dimuat",
+  "notesHint": "Catatan untuk slide ini",
+  "openNotesFile": "Buka file catatan",
+  "openingCommandEditor": "Membuka editor perintah di desktop",
+  "pairFirst": "Pair dulu dengan {device} untuk memakai {title}.",
+  "@pairFirst": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      },
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "pairNewDevice": "Sandingkan peranti baru",
+  "pairingRequest": "Permintaan pairing",
+  "pairingRequestBody": "Desktop meminta pairing. Cocokkan kunci ini dengan yang tampil di desktop, lalu tekan Terima.",
+  "pasteFromClipboard": "Tempel dari papan klip",
+  "pause": "Jeda",
+  "peerDevice": "Perangkat lawan",
+  "pingSent": "Ping terkirim ke {name}.",
+  "@pingSent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "play": "Putar",
+  "pluginBattery": "Baterai",
+  "pluginBatteryDesc": "Kirim status baterai HP ke desktop.",
+  "pluginClipboard": "Papan klip",
+  "pluginClipboardDesc": "Kirim dan terima isi papan klip dengan desktop.",
+  "pluginClipboardTile": "Kirim papan klip",
+  "pluginDisabledSnack": "Plugin {title} nonaktif. Aktifkan di Pengesetan plugin.",
+  "@pluginDisabledSnack": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "pluginFindMyPhone": "Cari HP",
+  "pluginFindMyPhoneDesc": "Bunyikan HP dari desktop.",
+  "pluginMpris": "Kendali multimedia",
+  "pluginMprisDesc": "Putar, jeda, dan ganti lagu di desktop.",
+  "pluginMprisTile": "Kendali multimedia",
+  "pluginNotification": "Notifikasi",
+  "pluginNotificationDesc": "Tampilkan notifikasi desktop di HP.",
+  "pluginPresenter": "Presentation remote",
+  "pluginPresenterDesc": "Kendalikan presentasi dan arahkan pointer.",
+  "pluginPresenterTile": "Presentation remote",
+  "pluginRemoteInput": "Masukan jarak jauh",
+  "pluginRemoteInputDesc": "Touchpad dan keyboard untuk desktop.",
+  "pluginRemoteInputTile": "Masukan jarak jauh",
+  "pluginRunCommand": "Jalankan perintah",
+  "pluginRunCommandDesc": "Jalankan perintah di desktop dan lihat hasilnya.",
+  "pluginRunCommandTile": "Jalankan Perintah",
+  "pluginSettingsHeader": "Plugin untuk {device}. Perubahan berlaku saat perangkat terhubung ulang.",
+  "@pluginSettingsHeader": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "pluginSettingsTitle": "Pengesetan plugin",
+  "pluginSftp": "Jelajah file (SFTP)",
+  "pluginSftpDesc": "Akses file desktop lewat SFTP.",
+  "pluginShare": "Kirim file",
+  "pluginShareDesc": "Kirim file ke desktop dan terima file darinya.",
+  "pluginShareTile": "Kirim file",
+  "pluginSystemVolume": "Volume sistem",
+  "pluginSystemVolumeDesc": "Atur volume speaker desktop.",
+  "previous": "Sebelumnya",
+  "previousSlideNotes": "Catatan slide sebelumnya",
+  "receivedFilesFolder": "Folder file diterima",
+  "refresh": "Muat ulang",
+  "reject": "Tolak",
+  "reloadList": "Muat ulang daftar",
+  "remoteInputSettingsTitle": "Pengaturan Masukan jarak jauh",
+  "requestPairing": "Minta pairing",
+  "reverseScrollDirection": "Arah Menggulir Terbalik",
+  "rewind10": "Mundur 10 detik",
+  "sameWifiHint": "Pastikan desktop dan HP berada di Wi-Fi yang sama.",
+  "scrollSensitivity": "Sensitivitas gulir",
+  "send": "Kirim",
+  "sendPing": "Kirim ping",
+  "sendText": "Kirim teks",
+  "sendingFile": "Mengirim file",
+  "sensDefault": "Bawaan",
+  "sensFast": "Cepat",
+  "sensSlow": "Pelan",
+  "setPointerAcceleration": "Setel akselerasi pointer",
+  "setTapActionOne": "Setel aksi ketuk satu jari",
+  "setTapActionThree": "Setel aksi ketuk tiga jari",
+  "setTapActionTwo": "Setel aksi ketuk dua jari",
+  "setTouchpadSensitivity": "Setel kepekaan touchpad",
+  "settings": "Pengaturan",
+  "showMouseButtons": "Tampilkan tombol tetikus",
+  "slideNotes": "Catatan slide",
+  "statusConnectedPaired": "Terhubung, paired",
+  "statusConnectedUnpaired": "Terhubung, belum dipair",
+  "statusDiscovered": "Ditemukan",
+  "statusOffline": "Luring",
+  "statusPairRequestCheckKey": "Minta pairing, cek kunci",
+  "stop": "Berhenti",
+  "stopCommands": "Hentikan perintah",
+  "tapCommandHint": "Ketuk perintah di bawah untuk menjalankannya.",
+  "tapLeft": "Klik kiri",
+  "tapMiddle": "Klik tengah",
+  "tapNone": "Tidak ada",
+  "tapRight": "Klik kanan",
+  "textToTypeLabel": "Teks yang akan diketik di desktop",
+  "thisDevice": "Perangkat ini",
+  "touchpadHint": "Geser satu jari di layar untuk menggerakkan kursor mouse. Ketuk untuk klik, dan gunakan dua atau tiga jari untuk tombol kanan dan tengah. Gunakan 2 jari untuk menggulir. Ketuk dua kali untuk drag and drop. Tetikus giroskop dapat diaktifkan dari pengaturan masukan jarak jauh",
+  "typeFieldHint": "Huruf yang diketik langsung terkirim",
+  "typeHere": "Ketik di sini",
+  "unknownNotConnected": "Belum diketahui (belum terhubung)",
+  "unknownUntilPairing": "Belum diketahui (muncul saat pairing)",
+  "unpair": "Leraikan",
+  "unpairBody": "Pairing dengan {device} akan dilepas dan sertifikatnya dihapus dari HP ini. Untuk memakai perangkat ini lagi, pairing harus diulang dari awal.",
+  "@unpairBody": {
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "unpairTitle": "Leraikan pairing?",
+  "unpaired": "Pairing dilepas.",
+  "verificationKey": "Kunci verifikasi",
+  "versionLabel": "Versi {version}",
+  "@versionLabel": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "waitingForDesktop": "Menunggu diterima di desktop",
+  "waitingForDesktopBody": "Permintaan pairing sudah terkirim. Cocokkan kunci ini dengan yang tampil di desktop, lalu tekan Terima di sana.",
+  "waitingForPlayer": "Menunggu status player dari desktop..."
+}

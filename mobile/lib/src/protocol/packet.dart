@@ -52,13 +52,12 @@ String? pluginForPacketType(String type) {
     'kdeconnect.clipboard' || 'kdeconnect.clipboard.connect' => 'clipboard',
     'kdeconnect.share.request' => 'share',
     'kdeconnect.notification' ||
-        'kdeconnect.notification.request' ||
-        'kdeconnect.notification.action' ||
-        'kdeconnect.notification.reply' =>
-      'notification',
+    'kdeconnect.notification.request' ||
+    'kdeconnect.notification.action' ||
+    'kdeconnect.notification.reply' => 'notification',
     'kdeconnect.mpris' || 'kdeconnect.mpris.request' => 'mpris',
-    'kdeconnect.systemvolume' || 'kdeconnect.systemvolume.request' =>
-      'systemvolume',
+    'kdeconnect.systemvolume' ||
+    'kdeconnect.systemvolume.request' => 'systemvolume',
     'kdeconnect.sftp' || 'kdeconnect.sftp.request' => 'sftp',
     'kdeconnect.presenter' => 'presenter',
     'kdeconnect.mousepad.request' => 'remoteinput',
@@ -97,17 +96,13 @@ class Packet {
       type: json['type'] as String? ?? '',
       body: (json['body'] as Map?)?.cast<String, dynamic>() ?? {},
       payloadSize: (json['payloadSize'] as num?)?.toInt(),
-      payloadTransferInfo:
-          (json['payloadTransferInfo'] as Map?)?.cast<String, dynamic>(),
+      payloadTransferInfo: (json['payloadTransferInfo'] as Map?)
+          ?.cast<String, dynamic>(),
     );
   }
 
   Map<String, dynamic> toJson() {
-    final map = <String, dynamic>{
-      'id': id,
-      'type': type,
-      'body': body,
-    };
+    final map = <String, dynamic>{'id': id, 'type': type, 'body': body};
     if (payloadSize != null) map['payloadSize'] = payloadSize;
     if (payloadTransferInfo != null) {
       map['payloadTransferInfo'] = payloadTransferInfo;
@@ -136,10 +131,8 @@ class Packet {
       'deviceId': deviceId,
       'deviceName': deviceName,
       'deviceType': 'phone',
-      'incomingCapabilities':
-          Capabilities.incoming.where(kept).toList(),
-      'outgoingCapabilities':
-          Capabilities.outgoing.where(kept).toList(),
+      'incomingCapabilities': Capabilities.incoming.where(kept).toList(),
+      'outgoingCapabilities': Capabilities.outgoing.where(kept).toList(),
       'protocolVersion': 7,
       'tcpPort': tcpPort,
     });

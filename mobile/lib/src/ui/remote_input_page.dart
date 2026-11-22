@@ -23,6 +23,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../../l10n/l10n.dart';
+
 import 'package:sensors_plus/sensors_plus.dart';
 
 import '../protocol/protocol.dart';
@@ -178,9 +181,9 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
                   key: const ValueKey('type-field'),
                   controller: _typeController,
                   focusNode: _focusNode,
-                  decoration: const InputDecoration(
-                    labelText: 'Ketik di sini',
-                    hintText: 'Huruf yang diketik langsung terkirim',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.typeHere,
+                    hintText: context.l10n.typeFieldHint,
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -189,7 +192,7 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
                 ),
               ),
               IconButton(
-                tooltip: 'Tempel dari papan klip',
+                tooltip: context.l10n.pasteFromClipboard,
                 icon: const Icon(Icons.content_paste),
                 onPressed: _pasteClipboard,
               ),
@@ -221,7 +224,7 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
                     ),
                   ),
                 PopupMenuButton<int>(
-                  tooltip: 'Tombol fungsi F1 sampai F12',
+                  tooltip: context.l10n.functionKeys,
                   onSelected: _sendSpecial,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -534,19 +537,19 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Masukan jarak jauh'),
+                Text(context.l10n.pluginRemoteInputTile),
                 Text(_entry.name, style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
             actions: [
               IconButton(
-                tooltip: 'Keyboard',
+                tooltip: context.l10n.keyboard,
                 icon: const Icon(Icons.keyboard),
                 isSelected: _keyboardOpen,
                 onPressed: conn == null ? null : _toggleKeyboard,
               ),
               IconButton(
-                tooltip: 'Kirim teks',
+                tooltip: context.l10n.sendText,
                 icon: const Icon(Icons.edit_note),
                 onPressed: conn == null
                     ? null
@@ -558,7 +561,7 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
                       ),
               ),
               IconButton(
-                tooltip: 'Pengaturan Masukan jarak jauh',
+                tooltip: context.l10n.remoteInputSettingsTitle,
                 icon: const Icon(Icons.settings),
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(
@@ -572,7 +575,7 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
             ],
           ),
           body: conn == null
-              ? const Center(child: Text('Tidak ada koneksi ke perangkat ini.'))
+              ? Center(child: Text(context.l10n.noConnection))
               : Column(
                   children: [
                     Expanded(
@@ -587,14 +590,7 @@ class _RemoteInputPageState extends State<RemoteInputPage> {
                           alignment: Alignment.center,
                           padding: const EdgeInsets.all(32),
                           child: Text(
-                            'Geser satu jari di layar untuk '
-                            'menggerakkan kursor mouse. Ketuk untuk '
-                            'klik, dan gunakan dua atau tiga jari '
-                            'untuk tombol kanan dan tengah. Gunakan '
-                            '2 jari untuk menggulir. Ketuk dua kali '
-                            'untuk drag and drop. Tetikus giroskop '
-                            'dapat diaktifkan dari pengaturan '
-                            'masukan jarak jauh',
+                            context.l10n.touchpadHint,
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),

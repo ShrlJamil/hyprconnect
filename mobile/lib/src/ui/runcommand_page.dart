@@ -10,6 +10,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
+
 import '../protocol/protocol.dart';
 import 'app_state.dart';
 
@@ -83,13 +85,13 @@ class _RunCommandPageState extends State<RunCommandPage> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Jalankan Perintah'),
+                Text(context.l10n.pluginRunCommandTile),
                 Text(_entry.name, style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
             actions: [
               PopupMenuButton<String>(
-                tooltip: 'Menu',
+                tooltip: context.l10n.menu,
                 onSelected: (value) {
                   if (value == 'refresh') {
                     _appState.requestRunCommands(_entry.deviceId);
@@ -98,21 +100,21 @@ class _RunCommandPageState extends State<RunCommandPage> {
                   }
                 },
                 itemBuilder: (context) => [
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'refresh',
-                    child: Text('Muat ulang daftar'),
+                    child: Text(context.l10n.reloadList),
                   ),
                   if (runningId != null)
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'stop',
-                      child: Text('Hentikan perintah'),
+                      child: Text(context.l10n.stopCommands),
                     ),
                 ],
               ),
             ],
           ),
           body: conn == null
-              ? const Center(child: Text('Tidak ada koneksi ke perangkat ini.'))
+              ? Center(child: Text(context.l10n.noConnection))
               : Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: Column(
@@ -128,13 +130,13 @@ class _RunCommandPageState extends State<RunCommandPage> {
                 ),
           floatingActionButton: canAdd && conn != null
               ? FloatingActionButton(
-                  tooltip: 'Ubah daftar perintah di desktop',
+                  tooltip: context.l10n.editCommandsOnDesktop,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
                   onPressed: () {
                     _appState.requestCommandSetup(_entry.deviceId);
-                    _toast('Membuka editor perintah di desktop');
+                    _toast(context.l10n.openingCommandEditor);
                   },
                   child: const Icon(Icons.edit),
                 )
@@ -158,7 +160,7 @@ class _RunCommandPageState extends State<RunCommandPage> {
       child: events.isEmpty
           ? Center(
               child: Text(
-                'Ketuk perintah di bawah untuk menjalankannya.',
+                context.l10n.tapCommandHint,
                 style: TextStyle(color: scheme.onSurfaceVariant),
               ),
             )
@@ -209,8 +211,7 @@ class _RunCommandPageState extends State<RunCommandPage> {
     if (commands.isEmpty) {
       return Center(
         child: Text(
-          'Desktop belum punya perintah yang bisa dijalankan.\n'
-          'Tambah lewat editor di desktop.',
+          context.l10n.noCommandsYet,
           textAlign: TextAlign.center,
           style: TextStyle(color: scheme.onSurfaceVariant),
         ),

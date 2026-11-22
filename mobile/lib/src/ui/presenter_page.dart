@@ -21,6 +21,9 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+
+import '../../l10n/l10n.dart';
+
 import 'package:sensors_plus/sensors_plus.dart';
 
 import '../protocol/protocol.dart';
@@ -190,13 +193,13 @@ class _PresenterPageState extends State<PresenterPage> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          tooltip: 'Kembali',
+          tooltip: context.l10n.back,
           onPressed: _close,
         ),
         actions: [
           IconButton(
             icon: Icon(_fullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
-            tooltip: 'Layar penuh',
+            tooltip: context.l10n.fullscreen,
             onPressed: _toggleFullscreen,
           ),
         ],
@@ -206,10 +209,10 @@ class _PresenterPageState extends State<PresenterPage> {
         builder: (context, _) {
           final conn = _appState.connectionFor(_entry.deviceId);
           if (conn == null) {
-            return const Center(
+            return Center(
               child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('Tidak ada koneksi ke perangkat ini.'),
+                padding: const EdgeInsets.all(24),
+                child: Text(context.l10n.noConnection),
               ),
             );
           }
@@ -228,10 +231,10 @@ class _PresenterPageState extends State<PresenterPage> {
                           child: OutlinedButton.icon(
                             onPressed: _goPrevious,
                             icon: const Icon(Icons.skip_previous, size: 34),
-                            label: const FittedBox(
+                            label: FittedBox(
                               fit: BoxFit.scaleDown,
                               child: Text(
-                                'Sebelumnya',
+                                context.l10n.previous,
                                 maxLines: 1,
                                 style: TextStyle(
                                   fontSize: 19,
@@ -249,10 +252,10 @@ class _PresenterPageState extends State<PresenterPage> {
                           child: FilledButton.icon(
                             onPressed: _goNext,
                             icon: const Icon(Icons.skip_next, size: 34),
-                            label: const FittedBox(
+                            label: FittedBox(
                               fit: BoxFit.scaleDown,
                               child: Text(
-                                'Berikutnya',
+                                context.l10n.next,
                                 maxLines: 1,
                                 style: TextStyle(
                                   fontSize: 19,
@@ -302,7 +305,7 @@ class _PresenterPageState extends State<PresenterPage> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Catatan slide',
+                    context.l10n.slideNotes,
                     style: TextStyle(
                       color: scheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
@@ -321,7 +324,7 @@ class _PresenterPageState extends State<PresenterPage> {
                     IconButton(
                       icon: const Icon(Icons.chevron_left, size: 20),
                       visualDensity: VisualDensity.compact,
-                      tooltip: 'Catatan slide sebelumnya',
+                      tooltip: context.l10n.previousSlideNotes,
                       onPressed: _slide > 1
                           ? () => setState(() => _slide--)
                           : null,
@@ -329,7 +332,7 @@ class _PresenterPageState extends State<PresenterPage> {
                     IconButton(
                       icon: const Icon(Icons.chevron_right, size: 20),
                       visualDensity: VisualDensity.compact,
-                      tooltip: 'Catatan slide berikutnya',
+                      tooltip: context.l10n.nextSlideNotes,
                       onPressed: () => setState(() => _slide++),
                     ),
                   ],
@@ -352,20 +355,20 @@ class _PresenterPageState extends State<PresenterPage> {
                     ? [
                         IconButton.filledTonal(
                           icon: const Icon(Icons.note_add_outlined),
-                          tooltip: 'Buat catatan',
+                          tooltip: context.l10n.createNotes,
                           onPressed: _openNotesEditor,
                         ),
                         const SizedBox(width: 12),
                         IconButton.filledTonal(
                           icon: const Icon(Icons.folder_open_outlined),
-                          tooltip: 'Buka file catatan',
+                          tooltip: context.l10n.openNotesFile,
                           onPressed: _openNotesFile,
                         ),
                       ]
                     : [
                         IconButton.filledTonal(
                           icon: const Icon(Icons.edit_outlined),
-                          tooltip: 'Ubah catatan',
+                          tooltip: context.l10n.editNotes,
                           onPressed: _openNotesEditor,
                         ),
                       ],
@@ -412,9 +415,9 @@ class _PresenterPageState extends State<PresenterPage> {
                         fontWeight: FontWeight.w600,
                       ),
                       items: [
-                        const DropdownMenuItem<String?>(
+                        DropdownMenuItem<String?>(
                           value: null,
-                          child: Text('Otomatis'),
+                          child: Text(context.l10n.automatic),
                         ),
                         for (final name in _appState.monitorListFor(
                           _entry.deviceId,

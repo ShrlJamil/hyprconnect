@@ -5,6 +5,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
+
 import 'app_state.dart';
 
 class SendTextPage extends StatefulWidget {
@@ -40,7 +42,7 @@ class _SendTextPageState extends State<SendTextPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Kirim teks'),
+            Text(context.l10n.sendText),
             Text(
               widget.entry.name,
               style: Theme.of(context).textTheme.bodySmall,
@@ -59,8 +61,8 @@ class _SendTextPageState extends State<SendTextPage> {
               autofocus: true,
               minLines: 3,
               maxLines: 6,
-              decoration: const InputDecoration(
-                labelText: 'Teks yang akan diketik di desktop',
+              decoration: InputDecoration(
+                labelText: context.l10n.textToTypeLabel,
                 border: OutlineInputBorder(),
               ),
             ),
@@ -73,7 +75,7 @@ class _SendTextPageState extends State<SendTextPage> {
             const SizedBox(height: 16),
             FilledButton.icon(
               icon: const Icon(Icons.send),
-              label: const Text('Kirim'),
+              label: Text(context.l10n.send),
               onPressed: _send,
             ),
           ],

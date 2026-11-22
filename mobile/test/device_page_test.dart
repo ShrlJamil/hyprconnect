@@ -4,6 +4,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:hyprconnect_mobile/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hyprconnect_mobile/src/settings/plugin_settings.dart';
 import 'package:hyprconnect_mobile/src/ui/app_state.dart';
@@ -26,15 +27,19 @@ DeviceListEntry _entry({bool online = true}) {
 }
 
 Widget _wrap(Widget child) {
-  return MaterialApp(home: child);
+  return MaterialApp(
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    locale: const Locale('id'),
+    home: child,
+  );
 }
 
 void main() {
-  testWidgets('device page shows six tiles and a connect button',
-      (tester) async {
-    final state = AppState.test(
-      settings: PluginSettings.inMemory(),
-    );
+  testWidgets('device page shows six tiles and a connect button', (
+    tester,
+  ) async {
+    final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
       _wrap(DevicePage(appState: state, entry: _entry())),
     );
@@ -55,11 +60,10 @@ void main() {
     expect(find.byTooltip('Menu perangkat'), findsOneWidget);
   });
 
-  testWidgets('three-dot menu lists ping, plugins, encryption, unpair',
-      (tester) async {
-    final state = AppState.test(
-      settings: PluginSettings.inMemory(),
-    );
+  testWidgets('three-dot menu lists ping, plugins, encryption, unpair', (
+    tester,
+  ) async {
+    final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
       _wrap(DevicePage(appState: state, entry: _entry())),
     );
@@ -74,11 +78,10 @@ void main() {
     expect(find.text('Leraikan'), findsOneWidget);
   });
 
-  testWidgets('tapping a tile while unpaired explains pairing is needed',
-      (tester) async {
-    final state = AppState.test(
-      settings: PluginSettings.inMemory(),
-    );
+  testWidgets('tapping a tile while unpaired explains pairing is needed', (
+    tester,
+  ) async {
+    final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
       _wrap(DevicePage(appState: state, entry: _entry())),
     );
@@ -91,37 +94,35 @@ void main() {
   });
 
   testWidgets(
-      'switching a plugin off greys out its tile and persists the choice',
-      (tester) async {
-    final settings = PluginSettings.inMemory();
-    final state = AppState.test(settings: settings);
-    final entry = _entry();
+    'switching a plugin off greys out its tile and persists the choice',
+    (tester) async {
+      final settings = PluginSettings.inMemory();
+      final state = AppState.test(settings: settings);
+      final entry = _entry();
 
-    await tester.pumpWidget(
-      _wrap(PluginSettingsPage(appState: state, entry: entry)),
-    );
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        _wrap(PluginSettingsPage(appState: state, entry: entry)),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Kirim file'), findsOneWidget);
-    await tester.tap(find.text('Kirim file'));
-    await tester.pump();
-    expect(settings.isEnabled(_deviceId, 'share'), isFalse);
+      expect(find.text('Kirim file'), findsOneWidget);
+      await tester.tap(find.text('Kirim file'));
+      await tester.pump();
+      expect(settings.isEnabled(_deviceId, 'share'), isFalse);
 
-    await tester.pumpWidget(
-      _wrap(DevicePage(appState: state, entry: entry)),
-    );
-    await tester.pumpAndSettle();
-    // Tiles no longer carry subtitles (removed on request); a
-    // switched-off plugin shows as a dimmed tile with no caption.
-    expect(find.text('Plugin nonaktif'), findsNothing);
-    expect(find.text('Kirim file'), findsOneWidget);
-  });
+      await tester.pumpWidget(_wrap(DevicePage(appState: state, entry: entry)));
+      await tester.pumpAndSettle();
+      // Tiles no longer carry subtitles (removed on request); a
+      // switched-off plugin shows as a dimmed tile with no caption.
+      expect(find.text('Plugin nonaktif'), findsNothing);
+      expect(find.text('Kirim file'), findsOneWidget);
+    },
+  );
 
-  testWidgets('encryption info page shows peer id and no-connection state',
-      (tester) async {
-    final state = AppState.test(
-      settings: PluginSettings.inMemory(),
-    );
+  testWidgets('encryption info page shows peer id and no-connection state', (
+    tester,
+  ) async {
+    final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
       _wrap(EncryptionInfoPage(appState: state, entry: _entry())),
     );

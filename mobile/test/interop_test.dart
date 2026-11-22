@@ -64,7 +64,9 @@ void main() {
     // daemon log.)
     final ss = await Process.run('ss', ['-ltn']);
     if (!(ss.stdout as String).contains(':$_daemonPort ')) {
-      markTestSkipped('daemon hyprconnect tidak jalan di $_daemonHost:$_daemonPort');
+      markTestSkipped(
+        'daemon hyprconnect tidak jalan di $_daemonHost:$_daemonPort',
+      );
       return;
     }
 
@@ -136,9 +138,8 @@ void main() {
       // Ping round-trip over the daemon-initiated channel.
       await conn.sendPing('M0 interop masuk');
       final pingLogged = await _waitUntil(
-        () async => (await _daemonLog()).contains(
-          'ping from $ourId: M0 interop masuk',
-        ),
+        () async =>
+            (await _daemonLog()).contains('ping from $ourId: M0 interop masuk'),
       );
       expect(pingLogged, isTrue, reason: 'daemon tidak mencatat ping');
 

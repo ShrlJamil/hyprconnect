@@ -10,6 +10,8 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
+
 import 'app_state.dart';
 import 'slide_notes.dart';
 
@@ -98,11 +100,11 @@ class _NotesEditorPageState extends State<NotesEditorPage> {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Catatan slide'),
+        title: Text(context.l10n.slideNotes),
         actions: [
           IconButton(
             icon: const Icon(Icons.folder_open_outlined),
-            tooltip: 'Buka file catatan',
+            tooltip: context.l10n.openNotesFile,
             onPressed: _openFile,
           ),
         ],
@@ -142,9 +144,9 @@ class _NotesEditorPageState extends State<NotesEditorPage> {
                     controller: _cells[i],
                     maxLines: null,
                     minLines: 2,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       border: InputBorder.none,
-                      hintText: 'Catatan untuk slide ini',
+                      hintText: context.l10n.notesHint,
                     ),
                     onChanged: (_) => _persist(),
                   ),
@@ -156,7 +158,7 @@ class _NotesEditorPageState extends State<NotesEditorPage> {
           OutlinedButton.icon(
             onPressed: _addSlide,
             icon: const Icon(Icons.add),
-            label: const Text('Tambah slide'),
+            label: Text(context.l10n.addSlide),
             style: OutlinedButton.styleFrom(
               minimumSize: const Size.fromHeight(52),
             ),

@@ -487,3 +487,7 @@ FAB pensil di kanan bawah yang mengirim setup request (daemon
 membuka editor perintah di aplikasi desktop). Terverifikasi live di
 emulator: mengetuk Terminal menjalankan kitty di desktop dan konsol
 menampilkan "$ kitty" hijau dengan penanda berjalan.
+
+## Addendum 2026-11-22 (malam): English first + lokalisasi OS
+
+Aplikasi kini English-first dengan lokalisasi Flutter standar: semua string UI hidup di lib/l10n/app_en.arb (sumber) dan app_id.arb (terjemahan Indonesia), MaterialApp memakai delegate bawaan sehingga OS yang memilih bahasa (locale sistem, atau bahasa per-aplikasi Android 13+ lewat locales_config.xml + android:localeConfig + resourceConfigurations en/id). Katalog plugin dan label enum remote input kini membawa id saja; teks tampilannya diselesaikan dari ARB (plugin_text.dart dan resolver di halaman pengaturan remote input). Log dan status di AppState ditulis dalam bahasa Inggris (bahasa sumber, tidak dilokalkan). Tes widget berjalan di locale id dan tetap menegaskan teks Indonesia; pageBack() diganti ketuk BackButton karena pageBack mencari tooltip Inggris. Terverifikasi di emulator: bahasa sistem Inggris menampilkan UI Inggris, locale per-aplikasi id menampilkan UI Indonesia dari build yang sama.

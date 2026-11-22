@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:hyprconnect_mobile/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hyprconnect_mobile/src/protocol/protocol.dart';
 import 'package:hyprconnect_mobile/src/settings/plugin_settings.dart';
@@ -52,14 +53,18 @@ void main() {
   testWidgets('no connection is stated honestly', (tester) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     await tester.pumpWidget(
-      MaterialApp(home: RunCommandPage(appState: state, entry: _entry())),
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
+        home: RunCommandPage(appState: state, entry: _entry()),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Tidak ada koneksi ke perangkat ini.'), findsOneWidget);
   });
 
-  testWidgets('command list and streamed output land in order',
-      (tester) async {
+  testWidgets('command list and streamed output land in order', (tester) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
     final conn = await _fakeConn(tester);
     await tester.runAsync(
@@ -112,7 +117,12 @@ void main() {
     // the streamed log.
     state.registerTestConnection(conn);
     await tester.pumpWidget(
-      MaterialApp(home: RunCommandPage(appState: state, entry: _entry())),
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
+        home: RunCommandPage(appState: state, entry: _entry()),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('Cek Disk'), findsOneWidget);

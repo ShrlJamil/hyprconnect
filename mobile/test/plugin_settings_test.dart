@@ -60,17 +60,15 @@ void main() {
     }
   });
 
-  test('unknown plugin ids are ignored, corrupt file means empty',
-      () async {
+  test('unknown plugin ids are ignored, corrupt file means empty', () async {
     final dir = await _tempDir();
     try {
       final settings = await PluginSettings.load(dir);
       await settings.setEnabled(_deviceA, 'tidak-ada', false);
       expect(settings.disabledPluginsFor(_deviceA), isEmpty);
 
-      await File(
-        '${dir.path}/plugin_settings.json',
-      ).writeAsString('bukan json {');
+      await File('${dir.path}/plugin_settings.json')
+          .writeAsString('bukan json {');
       final reloaded = await PluginSettings.load(dir);
       expect(reloaded.disabledPluginsFor(_deviceA), isEmpty);
     } finally {
@@ -79,22 +77,19 @@ void main() {
   });
 
   test('catalog matches the daemon plugin list and order', () {
-    expect(
-      pluginCatalog.map((p) => p.id).toList(),
-      [
-        'clipboard',
-        'share',
-        'notification',
-        'mpris',
-        'systemvolume',
-        'sftp',
-        'presenter',
-        'remoteinput',
-        'battery',
-        'findmyphone',
-        'runcommand',
-      ],
-    );
+    expect(pluginCatalog.map((p) => p.id).toList(), [
+      'clipboard',
+      'share',
+      'notification',
+      'mpris',
+      'systemvolume',
+      'sftp',
+      'presenter',
+      'remoteinput',
+      'battery',
+      'findmyphone',
+      'runcommand',
+    ]);
     // The six device-page tiles each map to exactly one plugin.
     expect(deviceTiles.map((t) => t.pluginId).toList(), [
       'share',

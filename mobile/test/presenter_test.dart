@@ -33,10 +33,7 @@ void main() {
     });
 
     test('set monitor sends the name; null sends "" for automatic', () {
-      expect(
-        presenterSetMonitor('DP-1').body,
-        {'setMonitor': 'DP-1'},
-      );
+      expect(presenterSetMonitor('DP-1').body, {'setMonitor': 'DP-1'});
       expect(presenterSetMonitor(null).body, {'setMonitor': ''});
     });
   });
@@ -45,27 +42,19 @@ void main() {
     test('next is 9 (PageDown), previous 8 (PageUp)', () {
       expect(PresenterKeys.next, 9);
       expect(PresenterKeys.previous, 8);
-      expect(
-        mousepadSpecialKey(PresenterKeys.next).body,
-        {'specialKey': 9},
-      );
-      expect(
-        mousepadSpecialKey(PresenterKeys.previous).body,
-        {'specialKey': 8},
-      );
+      expect(mousepadSpecialKey(PresenterKeys.next).body, {'specialKey': 9});
+      expect(mousepadSpecialKey(PresenterKeys.previous).body, {
+        'specialKey': 8,
+      });
     });
 
     test('fullscreen is 25 (F5), exit is 14 (Esc)', () {
       expect(PresenterKeys.fullscreen, 25);
       expect(PresenterKeys.escape, 14);
-      expect(
-        mousepadSpecialKey(PresenterKeys.fullscreen).body,
-        {'specialKey': 25},
-      );
-      expect(
-        mousepadSpecialKey(PresenterKeys.escape).body,
-        {'specialKey': 14},
-      );
+      expect(mousepadSpecialKey(PresenterKeys.fullscreen).body, {
+        'specialKey': 25,
+      });
+      expect(mousepadSpecialKey(PresenterKeys.escape).body, {'specialKey': 14});
     });
   });
 

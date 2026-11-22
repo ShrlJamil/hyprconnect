@@ -70,8 +70,9 @@ class TrustStore {
       try {
         final list = jsonDecode(await file.readAsString()) as List;
         for (final item in list) {
-          final device =
-              TrustedDevice.fromJson((item as Map).cast<String, dynamic>());
+          final device = TrustedDevice.fromJson(
+            (item as Map).cast<String, dynamic>(),
+          );
           if (device.deviceId.isNotEmpty) {
             devices[device.deviceId] = device;
           }

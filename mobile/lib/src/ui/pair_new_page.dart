@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
 import '../protocol/protocol.dart';
 import 'app_state.dart';
 import 'device_page.dart';
@@ -16,7 +17,7 @@ class PairNewPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Sandingkan peranti baru')),
+      appBar: AppBar(title: Text(context.l10n.pairNewDevice)),
       body: AnimatedBuilder(
         animation: appState,
         builder: (context, _) {
@@ -27,11 +28,9 @@ class PairNewPage extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             children: [
               if (candidates.isEmpty)
-                const ListTile(
-                  title: Text('Belum ada perangkat di jaringan ini'),
-                  subtitle: Text(
-                    'Pastikan desktop dan HP berada di Wi-Fi yang sama.',
-                  ),
+                ListTile(
+                  title: Text(context.l10n.noDeviceOnNetwork),
+                  subtitle: Text(context.l10n.sameWifiHint),
                 ),
               for (final entry in candidates)
                 _DiscoveredRow(
@@ -70,15 +69,16 @@ class _DiscoveredRow extends StatelessWidget {
     final conn = appState.connectionFor(entry.deviceId);
     final paired = conn?.isPaired ?? false;
     final pendingIn = conn != null && conn.pairState == PairState.pendingIn;
+    final l = context.l10n;
     final status = !entry.online
-        ? 'Luring'
+        ? l.statusOffline
         : conn == null
-        ? 'Ditemukan'
+        ? l.statusDiscovered
         : paired
-        ? 'Terhubung, paired'
+        ? l.statusConnectedPaired
         : pendingIn
-        ? 'Minta pairing, cek kunci'
-        : 'Terhubung, belum dipair';
+        ? l.statusPairRequestCheckKey
+        : l.statusConnectedUnpaired;
     return Card(
       child: ListTile(
         leading: Icon(

@@ -6,8 +6,10 @@
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
 import '../settings/plugin_settings.dart';
 import 'app_state.dart';
+import 'plugin_text.dart';
 
 class PluginSettingsPage extends StatelessWidget {
   final AppState appState;
@@ -22,7 +24,7 @@ class PluginSettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Pengesetan plugin')),
+      appBar: AppBar(title: Text(context.l10n.pluginSettingsTitle)),
       body: AnimatedBuilder(
         animation: appState,
         builder: (context, _) {
@@ -32,15 +34,16 @@ class PluginSettingsPage extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 child: Text(
-                  'Plugin untuk ${entry.name.isEmpty ? entry.deviceId : entry.name}. '
-                  'Perubahan berlaku saat perangkat terhubung ulang.',
+                  context.l10n.pluginSettingsHeader(
+                    entry.name.isEmpty ? entry.deviceId : entry.name,
+                  ),
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
               for (final plugin in pluginCatalog)
                 SwitchListTile(
-                  title: Text(plugin.title),
-                  subtitle: Text(plugin.description),
+                  title: Text(pluginTitle(context.l10n, plugin.id)),
+                  subtitle: Text(pluginDescription(context.l10n, plugin.id)),
                   value: settings.isEnabled(entry.deviceId, plugin.id),
                   onChanged: (enabled) {
                     appState.setPluginEnabled(

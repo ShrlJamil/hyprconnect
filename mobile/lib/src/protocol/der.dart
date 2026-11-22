@@ -14,7 +14,7 @@ class _Tlv {
   final int totalLength;
 
   const _Tlv(this.tag, this.headerLength, this.length, this.valueOffset)
-      : totalLength = headerLength + length;
+    : totalLength = headerLength + length;
 }
 
 _Tlv _readTlv(Uint8List bytes, int offset) {
@@ -33,7 +33,9 @@ _Tlv _readTlv(Uint8List bytes, int offset) {
     length = lengthByte;
   } else {
     final lengthBytes = lengthByte & 0x7f;
-    if (lengthBytes == 0 || lengthBytes > 4 || pos + lengthBytes > bytes.length) {
+    if (lengthBytes == 0 ||
+        lengthBytes > 4 ||
+        pos + lengthBytes > bytes.length) {
       throw const FormatException('DER unsupported length form');
     }
     length = 0;
@@ -67,9 +69,11 @@ List<_Tlv> _children(Uint8List bytes, _Tlv parent) {
 /// Raw DER bytes of the subjectPublicKeyInfo element of [certDer].
 Uint8List extractSpki(Uint8List certDer) {
   final cert = _readTlv(certDer, 0);
-  if (cert.tag != 0x30) throw const FormatException('certificate is not a SEQUENCE');
+  if (cert.tag != 0x30)
+    throw const FormatException('certificate is not a SEQUENCE');
   final tbs = _readTlv(certDer, cert.valueOffset);
-  if (tbs.tag != 0x30) throw const FormatException('TBSCertificate is not a SEQUENCE');
+  if (tbs.tag != 0x30)
+    throw const FormatException('TBSCertificate is not a SEQUENCE');
   final fields = _children(certDer, tbs);
   // TBSCertificate: [0] version (optional, present in v3),
   // serial, signature, issuer, validity, subject, subjectPublicKeyInfo.
@@ -81,7 +85,11 @@ Uint8List extractSpki(Uint8List certDer) {
   final spki = fields[spkiIndex];
   if (spki.tag != 0x30) throw const FormatException('SPKI is not a SEQUENCE');
   final spkiOffset = _elementOffset(certDer, tbs, spkiIndex);
-  return Uint8List.sublistView(certDer, spkiOffset, spkiOffset + spki.totalLength);
+  return Uint8List.sublistView(
+    certDer,
+    spkiOffset,
+    spkiOffset + spki.totalLength,
+  );
 }
 
 int _elementOffset(Uint8List bytes, _Tlv parent, int index) {

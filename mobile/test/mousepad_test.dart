@@ -30,22 +30,12 @@ void main() {
 
   group('mousepadClick / mousepadHold', () {
     test('each click variant sets its own field', () {
-      expect(
-        mousepadClick(MousepadClick.left).body,
-        {'singleclick': true},
-      );
-      expect(
-        mousepadClick(MousepadClick.doubleLeft).body,
-        {'doubleclick': true},
-      );
-      expect(
-        mousepadClick(MousepadClick.right).body,
-        {'rightclick': true},
-      );
-      expect(
-        mousepadClick(MousepadClick.middle).body,
-        {'middleclick': true},
-      );
+      expect(mousepadClick(MousepadClick.left).body, {'singleclick': true});
+      expect(mousepadClick(MousepadClick.doubleLeft).body, {
+        'doubleclick': true,
+      });
+      expect(mousepadClick(MousepadClick.right).body, {'rightclick': true});
+      expect(mousepadClick(MousepadClick.middle).body, {'middleclick': true});
     });
 
     test('hold down and release', () {
@@ -73,10 +63,7 @@ void main() {
     });
 
     test('super modifier is spelled super, like the daemon reads it', () {
-      final packet = mousepadKey(
-        'l',
-        const MousepadModifiers(superKey: true),
-      );
+      final packet = mousepadKey('l', const MousepadModifiers(superKey: true));
       expect(packet.body['super'], isTrue);
     });
 
@@ -101,16 +88,12 @@ void main() {
     });
 
     test('modifiers combine with a special key', () {
-      final packet = mousepadSpecialKey(
-        9,
-        const MousepadModifiers(ctrl: true),
-      );
+      final packet = mousepadSpecialKey(9, const MousepadModifiers(ctrl: true));
       expect(packet.body['specialKey'], 9);
       expect(packet.body['ctrl'], isTrue);
     });
 
-    test('codes outside 1..32 are refused (daemon would only log them)',
-        () {
+    test('codes outside 1..32 are refused (daemon would only log them)', () {
       expect(() => mousepadSpecialKey(0), throwsArgumentError);
       expect(() => mousepadSpecialKey(33), throwsArgumentError);
       expect(() => mousepadSpecialKey(999), throwsArgumentError);

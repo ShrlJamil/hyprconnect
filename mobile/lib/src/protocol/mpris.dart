@@ -114,9 +114,7 @@ class MprisPlayerState {
 
 /// kdeconnect.mpris.request asking for the player list.
 Packet mprisRequestPlayerList() {
-  return Packet.now('kdeconnect.mpris.request', {
-    'requestPlayerList': true,
-  });
+  return Packet.now('kdeconnect.mpris.request', {'requestPlayerList': true});
 }
 
 /// kdeconnect.mpris.request asking for one player's current state.

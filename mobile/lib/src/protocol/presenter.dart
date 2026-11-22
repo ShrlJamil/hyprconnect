@@ -80,9 +80,7 @@ Packet presenterRequestMonitorList() {
 /// monitor, else the focused one. The daemon answers with the
 /// updated monitor list packet.
 Packet presenterSetMonitor(String? monitor) {
-  return Packet.now('kdeconnect.presenter', {
-    'setMonitor': monitor ?? '',
-  });
+  return Packet.now('kdeconnect.presenter', {'setMonitor': monitor ?? ''});
 }
 
 /// The monitor list a desktop reported, parsed from a

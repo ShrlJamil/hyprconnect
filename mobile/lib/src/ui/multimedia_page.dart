@@ -20,6 +20,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../l10n/l10n.dart';
+
 import '../protocol/protocol.dart';
 import 'app_state.dart';
 
@@ -92,7 +94,7 @@ class _MultimediaPageState extends State<MultimediaPage>
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Kendali multimedia'),
+                Text(context.l10n.pluginMpris),
                 Text(
                   _entry.name,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -103,7 +105,7 @@ class _MultimediaPageState extends State<MultimediaPage>
             ),
             actions: [
               IconButton(
-                tooltip: 'Muat ulang',
+                tooltip: context.l10n.refresh,
                 icon: const Icon(Icons.refresh),
                 onPressed: _refresh,
               ),
@@ -112,14 +114,14 @@ class _MultimediaPageState extends State<MultimediaPage>
                 ? null
                 : TabBar(
                     controller: _tabs,
-                    tabs: const [
-                      Tab(text: 'Putar'),
-                      Tab(text: 'Peranti'),
+                    tabs: [
+                      Tab(text: context.l10n.play),
+                      Tab(text: context.l10n.devices),
                     ],
                   ),
           ),
           body: conn == null
-              ? const Center(child: Text('Tidak ada koneksi ke perangkat ini.'))
+              ? Center(child: Text(context.l10n.noConnection))
               : TabBarView(
                   controller: _tabs,
                   children: [
@@ -182,8 +184,8 @@ class _MultimediaPageState extends State<MultimediaPage>
         const SizedBox(height: 24),
         Text(
           players.isEmpty
-              ? 'Tidak ada pemutar yang ditemukan'
-              : 'Menunggu status player dari desktop...',
+              ? context.l10n.noPlayerFound
+              : context.l10n.waitingForPlayer,
           style: Theme.of(context).textTheme.titleMedium
               ?.copyWith(fontWeight: FontWeight.w600),
           textAlign: TextAlign.center,
@@ -284,7 +286,7 @@ class _MultimediaPageState extends State<MultimediaPage>
     final playing = state?.isPlaying ?? false;
     final enabled = state != null && (playing ? state.canPause : state.canPlay);
     return Tooltip(
-      message: playing ? 'Jeda' : 'Putar',
+      message: playing ? context.l10n.pause : context.l10n.play,
       child: SizedBox(
         width: double.infinity,
         height: 64,
@@ -336,7 +338,7 @@ class _MultimediaPageState extends State<MultimediaPage>
     return Row(
       children: [
         button(
-          tooltip: 'Sebelumnya',
+          tooltip: context.l10n.previous,
           icon: Icons.skip_previous,
           enabled: state?.canGoPrevious ?? false,
           action: () => _appState.sendMprisAction(_entry.deviceId, 'Previous'),
@@ -344,7 +346,7 @@ class _MultimediaPageState extends State<MultimediaPage>
         if (canSeek) ...[
           const SizedBox(width: 12),
           button(
-            tooltip: 'Mundur 10 detik',
+            tooltip: context.l10n.rewind10,
             icon: Icons.fast_rewind,
             enabled: true,
             action: () => _appState.seekMpris(_entry.deviceId, -10),
@@ -352,7 +354,7 @@ class _MultimediaPageState extends State<MultimediaPage>
         ],
         const SizedBox(width: 12),
         button(
-          tooltip: 'Berhenti',
+          tooltip: context.l10n.stop,
           icon: Icons.stop,
           enabled: state != null,
           action: () => _appState.sendMprisAction(_entry.deviceId, 'Stop'),
@@ -360,7 +362,7 @@ class _MultimediaPageState extends State<MultimediaPage>
         if (canSeek) ...[
           const SizedBox(width: 12),
           button(
-            tooltip: 'Maju 10 detik',
+            tooltip: context.l10n.forward10,
             icon: Icons.fast_forward,
             enabled: true,
             action: () => _appState.seekMpris(_entry.deviceId, 10),
@@ -368,7 +370,7 @@ class _MultimediaPageState extends State<MultimediaPage>
         ],
         const SizedBox(width: 12),
         button(
-          tooltip: 'Berikutnya',
+          tooltip: context.l10n.next,
           icon: Icons.skip_next,
           enabled: state?.canGoNext ?? false,
           action: () => _appState.sendMprisAction(_entry.deviceId, 'Next'),
@@ -449,11 +451,11 @@ class _MultimediaPageState extends State<MultimediaPage>
 
   Widget _devicesTab(List<SinkState> sinks) {
     if (sinks.isEmpty) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Text(
-            'Tidak ada perangkat audio yang ditemukan',
+            context.l10n.noAudioDeviceFound,
             textAlign: TextAlign.center,
           ),
         ),

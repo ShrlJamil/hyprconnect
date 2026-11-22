@@ -132,10 +132,7 @@ class LocalIdentity {
 
   /// Extract (common name, SPKI DER) from a peer certificate DER.
   static ({String commonName, Uint8List spki}) certInfo(Uint8List certDer) {
-    return (
-      commonName: extractCommonName(certDer),
-      spki: extractSpki(certDer),
-    );
+    return (commonName: extractCommonName(certDer), spki: extractSpki(certDer));
   }
 
   /// KDE Connect verification key: SHA-256 over both devices' public

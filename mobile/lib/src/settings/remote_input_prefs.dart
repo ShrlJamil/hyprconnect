@@ -15,10 +15,10 @@ import 'dart:io';
 
 /// What a tap with a given finger count sends.
 enum TapAction {
-  left('Klik kiri'),
-  right('Klik kanan'),
-  middle('Klik tengah'),
-  none('Tidak ada');
+  left('Left click'),
+  right('Right click'),
+  middle('Middle click'),
+  none('None');
 
   final String label;
   const TapAction(this.label);
@@ -26,9 +26,9 @@ enum TapAction {
 
 /// Touchpad sensitivity presets (a plain multiplier on drag deltas).
 enum SensitivityPreset {
-  slow('Pelan', 0.6),
-  standard('Bawaan', 1.0),
-  fast('Cepat', 1.6);
+  slow('Slow', 0.6),
+  standard('Default', 1.0),
+  fast('Fast', 1.6);
 
   final String label;
   final double factor;
@@ -38,10 +38,10 @@ enum SensitivityPreset {
 /// Pointer acceleration presets (extra gain that grows with the
 /// speed of the drag, so fast flicks travel further).
 enum AccelerationPreset {
-  off('Mati', 0.0),
-  low('Rendah', 0.5),
-  medium('Menengah', 1.0),
-  high('Tinggi', 1.8);
+  off('Off', 0.0),
+  low('Low', 0.5),
+  medium('Medium', 1.0),
+  high('High', 1.8);
 
   final String label;
   final double gain;

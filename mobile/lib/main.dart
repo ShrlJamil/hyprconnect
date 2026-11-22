@@ -1,7 +1,7 @@
-//! HyprConnect mobile — M1 shell: home device list over the shared
-//! AppState, device page per device (see lib/src/ui/device_page.dart).
-//! The protocol foundation (identity, discovery, TLS, pairing, ping)
-//! is M0; the six tiles' features land in M2-M5.
+//! HyprConnect mobile — M2: M1 shell plus file sharing and clipboard
+//! (see lib/src/ui/share_page.dart and clipboard_page.dart). The
+//! protocol foundation (identity, discovery, TLS, pairing, ping) is M0;
+//! the remaining tiles' features land in M3-M5.
 
 import 'package:flutter/material.dart';
 

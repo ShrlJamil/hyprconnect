@@ -14,9 +14,11 @@ import 'package:flutter/material.dart';
 import '../protocol/protocol.dart';
 import '../settings/plugin_settings.dart';
 import 'app_state.dart';
+import 'clipboard_page.dart';
 import 'encryption_info_page.dart';
 import 'feature_placeholder_page.dart';
 import 'plugin_settings_page.dart';
+import 'share_page.dart';
 
 IconData _tileIcon(String pluginId) {
   return switch (pluginId) {
@@ -125,6 +127,28 @@ class _DevicePageState extends State<DevicePage> {
     if (!_appState.pluginSettings.isEnabled(_entry.deviceId, pluginId)) {
       _snack(
         'Plugin $title nonaktif. Aktifkan di Pengesetan plugin.',
+      );
+      return;
+    }
+    if (pluginId == 'share') {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => SharePage(
+            appState: _appState,
+            entry: _entry,
+          ),
+        ),
+      );
+      return;
+    }
+    if (pluginId == 'clipboard') {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => ClipboardPage(
+            appState: _appState,
+            entry: _entry,
+          ),
+        ),
       );
       return;
     }

@@ -37,6 +37,7 @@ dependencies:
   basic_utils: ^5.8.2
   path_provider: ^2.1.6
   crypto: ^3.0.8
+  file_picker: ^13.4.1
 
 dev_dependencies:
   flutter_test:

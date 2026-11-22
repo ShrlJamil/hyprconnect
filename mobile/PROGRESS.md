@@ -89,9 +89,33 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
       Daemon TIDAK diubah sama sekali di fase ini; tes interop M0
       tetap lolos melawan daemon yang sedang jalan (systemd active,
       port 1714 listen).
-- [ ] M2 Send file (share.request with payload upload) and Send clipboard
+- [x] M2 Send file (share.request with payload upload) and Send clipboard
       (clipboard push; receive sets the phone clipboard), within Android
       limits.
+      SELESAI 2026-11-22 14:15. Bukti: `flutter test --concurrency=1`
+      32/32 lolos (M0 11 + M1 13 + M2 7 baru + interop M0 1);
+      `flutter analyze` bersih; `flutter build apk --debug` berhasil
+      (mobile/build/app/outputs/flutter-apk/app-debug.apk, 181 MB).
+      Bukti hidup dari log daemon (14:14:33-34): `clipboard received
+      (21 chars), applying`, `received m2-interop-...txt (42 bytes) ->
+      ~/Downloads/...`, `offered m2-daemon-file.txt (40 bytes)` +
+      `sent ... (40 bytes)`, `local clipboard changed (23 chars),
+      forwarding to 2 device(s)` — keempat arah (kirim/terima file dan
+      papan klip) terbukti melawan daemon yang sedang jalan.
+      Daemon TIDAK diubah sama sekali; tes interop M0 tetap lolos.
+      Catatan penting: (1) peran payload TLS natural — pendengar =
+      server TLS, penghubung = klien TLS (kebalikan dari kanal utama),
+      CN peer diperiksa kedua arah; (2) `wl-copy` melakukan fork dan
+      anaknya menahan pipe stdout/stderr, jadi `Process.run` menunggunya
+      selamanya — tes interop meluncurkannya terlepas dengan stdio ke
+      /dev/null; (3) di `testWidgets`, I/O file async macet di zona
+      fake-async — pembuatan identitas dan penanganan paket di tes
+      widget harus dibungkus `tester.runAsync`; (4) dua tes interop
+      tidak boleh jalan bersamaan (keduanya pairing ke daemon) —
+      suite penuh dijalankan dengan `--concurrency=1`;
+      (5) file_picker 13 mengubah API: `FilePicker.pickFile()` statis,
+      `PlatformFile` tanpa `size` (pakai `length()` dan
+      `readAsByteStream()`).
 - [ ] M3 Multimedia control (control the desktop players from the phone)
       and Run commands (list, run, streamed output).
 - [ ] M4 Remote input: touchpad and keyboard to the desktop
@@ -131,6 +155,25 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
   DeviceConnection.unpair()/rejectPair() (pair:false, sudah dikenal
   daemon). Tes baru: test/plugin_settings_test.dart,
   test/device_page_test.dart; packet_test dan tls_test diperluas.
-- Next step: M2 — Kirim file (share.request + upload payload) dan
-  Kirim papan klip (clipboard push; terima mengatur papan klip HP),
-  dalam batas Android.
+- 2026-11-22 14:15 M2 selesai (lihat centang di atas). File baru:
+  mobile/lib/src/protocol/payload.dart (batas 512000 karakter,
+  sanitasi nama file, dedup `nama (n).ext`, model ReceivedFile),
+  mobile/lib/src/ui/share_page.dart (pilih file lewat picker sistem,
+  kirim dengan progres, daftar file diterima),
+  mobile/lib/src/ui/clipboard_page.dart (tulis/tempel/kirim, papan
+  klip terakhir diterima). Perubahan protokol: DeviceConnection
+  .sendClipboard() (tolak isi di atas batas daemon),
+  .sendFile() (listener payload + share.request + streaming TLS),
+  .receiveFile() (unduh payload ke folder terima), remoteAddress
+  dari kanal utama. AppState menangani paket masuk: clipboard
+  (dengan echo guard) mengatur papan klip HP, share.request teks
+  jadi clipboard dan url hanya dicatat, file diunduh ke
+  HyprConnect/ di penyimpanan eksternal (fallback dokumen app).
+  Ubin Kirim file dan Kirim papan klip kini membuka halaman
+  sungguhan, bukan placeholder. Tes baru: test/share_test.dart
+  (5: bentuk paket, sanitasi, dedup, batas clipboard, round-trip
+  payload dua arah), test/clipboard_page_test.dart (2 widget),
+  test/interop_m2_test.dart (1: empat arah melawan daemon).
+  Dependensi baru: file_picker ^13.4.1 (pub.dev publik).
+- Next step: M3 — Kendali multimedia (kendali player desktop dari HP)
+  dan Jalankan Perintah (daftar, jalankan, output streaming).

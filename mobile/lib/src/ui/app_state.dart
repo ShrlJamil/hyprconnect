@@ -11,6 +11,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../protocol/protocol.dart';
@@ -64,6 +65,13 @@ class AppState extends ChangeNotifier {
   final Map<String, DiscoveredDevice> _found = {};
   final Map<String, DeviceConnection> _connections = {};
   final List<String> _log = [];
+  Directory? _receiveDir;
+  final List<ReceivedFile> _receivedFiles = [];
+  String? _lastReceivedClipboard;
+  String? _lastReceivedFrom;
+  DateTime? _lastReceivedAt;
+  String? _lastClipboardSent;
+  String? _lastClipboardApplied;
   String _status = 'Memulai...';
   bool _started = false;
 
@@ -77,6 +85,21 @@ class AppState extends ChangeNotifier {
 
   String get status => _status;
   List<String> get log => List.unmodifiable(_log);
+
+  /// Files received from peers, newest first.
+  List<ReceivedFile> get receivedFiles => List.unmodifiable(_receivedFiles);
+
+  List<ReceivedFile> receivedFilesFor(String deviceId) {
+    return _receivedFiles.where((f) => f.deviceId == deviceId).toList();
+  }
+
+  /// Last clipboard text received from a peer, if any.
+  String? get lastReceivedClipboard => _lastReceivedClipboard;
+  String? get lastReceivedFrom => _lastReceivedFrom;
+  DateTime? get lastReceivedAt => _lastReceivedAt;
+
+  /// Where files from peers are saved, if known yet.
+  String? get receiveDirPath => _receiveDir?.path;
 
   DeviceConnection? connectionFor(String deviceId) {
     return _connections[deviceId];
@@ -138,6 +161,7 @@ class AppState extends ChangeNotifier {
       );
       final trust = await TrustStore.load(appDir);
       final pluginSettings = await PluginSettings.load(appDir);
+      _receiveDir = await _resolveReceiveDir();
       final listener = TcpListener();
       final port = await listener.start();
       final discovery = Discovery(identity: identity, tcpPort: port);
@@ -158,6 +182,111 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       _status = 'Gagal memulai: $e';
       notifyListeners();
+    }
+  }
+
+
+  /// Files from peers land in HyprConnect/ under external storage on
+  /// Android (visible in a file manager); anywhere else, under the
+  /// app documents directory.
+  Future<Directory> _resolveReceiveDir() async {
+    try {
+      final ext = await getExternalStorageDirectory();
+      if (ext != null) {
+        final dir = Directory('${ext.path}/HyprConnect');
+        await dir.create(recursive: true);
+        return dir;
+      }
+    } catch (_) {
+      // External storage is unsupported on this platform.
+    }
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory('${docs.path}/HyprConnect');
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// Handle one packet that arrived on [conn]: ping logging, clipboard
+  /// receive (sets the phone clipboard), and share requests (text and
+  /// url like the daemon handles them; files are downloaded to the
+  /// receive dir). Errors are logged, never thrown to the read loop.
+  Future<void> handleIncomingPacket(
+    DeviceConnection conn,
+    Packet packet,
+  ) async {
+    try {
+      switch (packet.type) {
+        case 'kdeconnect.ping':
+          _logLine('Ping dari ${conn.remoteName}');
+        case 'kdeconnect.clipboard':
+        case 'kdeconnect.clipboard.connect':
+          final content = packet.body['content'] as String?;
+          if (content != null) {
+            await _applyRemoteClipboard(conn, content);
+          }
+        case 'kdeconnect.share.request':
+          await _handleShareRequest(conn, packet);
+      }
+    } catch (e) {
+      _logLine('Gagal menangani ${packet.type}: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Clipboard text arrived from a peer: set the phone clipboard,
+  /// unless it is what we just sent or already applied (echo guard,
+  /// same idea as the daemon's last_clipboard).
+  Future<void> _applyRemoteClipboard(
+    DeviceConnection conn,
+    String content,
+  ) async {
+    if (content.isEmpty) return;
+    if (content == _lastClipboardSent ||
+        content == _lastClipboardApplied) {
+      return;
+    }
+    _lastClipboardApplied = content;
+    _lastReceivedClipboard = content;
+    _lastReceivedFrom = conn.remoteName ?? conn.remoteDeviceId ?? '';
+    _lastReceivedAt = DateTime.now();
+    await Clipboard.setData(ClipboardData(text: content));
+    _logLine(
+      'Papan klip diterima dari ${conn.remoteName} '
+      '(${content.length} karakter)',
+    );
+  }
+
+  /// A share.request arrived: text is applied as clipboard and url is
+  /// only logged, exactly like the daemon; a file is downloaded over
+  /// its payload connection into the receive dir.
+  Future<void> _handleShareRequest(
+    DeviceConnection conn,
+    Packet packet,
+  ) async {
+    final text = packet.body['text'] as String?;
+    if (text != null) {
+      await _applyRemoteClipboard(conn, text);
+      return;
+    }
+    final url = packet.body['url'] as String?;
+    if (url != null) {
+      _logLine('Tautan dibagikan dari ${conn.remoteName}: $url');
+      return;
+    }
+    final dir = _receiveDir;
+    if (dir == null) {
+      _logLine('Tidak ada folder terima, file ditolak');
+      return;
+    }
+    try {
+      final received = await conn.receiveFile(packet, dir);
+      _receivedFiles.insert(0, received);
+      _logLine(
+        'File diterima: ${received.filename} (${received.size} byte) '
+        '-> ${received.path}',
+      );
+    } catch (e) {
+      _logLine('Gagal menerima file dari ${conn.remoteName}: $e');
     }
   }
 
@@ -199,10 +328,7 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     });
     conn.packets.listen((packet) {
-      if (packet.type == 'kdeconnect.ping') {
-        _logLine('Ping dari ${conn.remoteName}');
-        notifyListeners();
-      }
+      unawaited(handleIncomingPacket(conn, packet));
     });
     notifyListeners();
   }
@@ -275,6 +401,62 @@ class AppState extends ChangeNotifier {
       _logLine('Tolak pairing gagal: $e');
     }
     notifyListeners();
+  }
+
+
+  /// Send clipboard content to a device. Returns false when there is
+  /// no connection or the content is empty; over-long content throws
+  /// (the daemon would silently drop it).
+  Future<bool> sendClipboard(String deviceId, String content) async {
+    final conn = _connections[deviceId];
+    if (conn == null || content.isEmpty) return false;
+    _lastClipboardSent = content;
+    try {
+      await conn.sendClipboard(content);
+      _logLine(
+        'Papan klip terkirim ke ${conn.remoteName} '
+        '(${content.length} karakter)',
+      );
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _logLine('Papan klip gagal: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Send a file to a device. [bytes] is streamed to the peer's
+  /// payload connection; [onProgress] reports bytes sent.
+  Future<void> sendFile(
+    String deviceId, {
+    required String filename,
+    required int size,
+    required Stream<List<int>> bytes,
+    void Function(int sent)? onProgress,
+  }) async {
+    final conn = _connections[deviceId];
+    if (conn == null) throw StateError('not connected');
+    try {
+      await conn.sendFile(
+        filename: filename,
+        size: size,
+        bytes: bytes,
+        onProgress: onProgress,
+      );
+      _logLine('File terkirim ke ${conn.remoteName}: $filename ($size byte)');
+    } catch (e) {
+      _logLine('File gagal: $e');
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  /// Current system clipboard text, or null when it holds no text.
+  Future<String?> readClipboardText() async {
+    final data = await Clipboard.getData('text/plain');
+    return data?.text;
   }
 
   Future<void> sendPing(String deviceId, [String? message]) async {

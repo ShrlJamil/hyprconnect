@@ -25,6 +25,7 @@ import 'dart:typed_data';
 
 import 'identity.dart';
 import 'packet.dart';
+import 'payload.dart';
 import 'trust_store.dart';
 
 enum PairState { unknown, unpaired, pendingOut, pendingIn, paired }
@@ -44,6 +45,10 @@ class DeviceConnection {
   String? remoteType;
   Uint8List? peerCertDer;
   Uint8List? peerSpki;
+
+  /// Address of the peer on this channel, for payload connections
+  /// (the receiver connects back to the sender's payload port).
+  InternetAddress? remoteAddress;
   PairState _pairState = PairState.unknown;
 
   /// Plugins the user switched off for this peer. They are filtered
@@ -180,6 +185,7 @@ class DeviceConnection {
     }
     peerCertDer = certDer;
     peerSpki = info.spki;
+    remoteAddress = secure.remoteAddress;
     _socket = secure;
     await sendPacket(_identityPacket());
     _setPairState(
@@ -332,6 +338,173 @@ class DeviceConnection {
   Future<void> rejectPair() async {
     await sendPacket(Packet.pair(false));
     _setPairState(PairState.unpaired);
+  }
+
+
+  /// Send clipboard content to the peer (kdeconnect.clipboard).
+  /// Content longer than the daemon's limit is refused up front:
+  /// the daemon would silently drop it.
+  Future<void> sendClipboard(String content) async {
+    if (content.length > maxClipboardChars) {
+      throw ArgumentError(
+        'clipboard content exceeds $maxClipboardChars characters',
+      );
+    }
+    await sendPacket(
+      Packet.now('kdeconnect.clipboard', {'content': content}),
+    );
+  }
+
+  /// Offer a file to the peer (kdeconnect.share.request + payload).
+  /// Mirrors the daemon's send_file: listen on a payload port, send
+  /// the share packet naming it, then serve [bytes] over one TLS
+  /// connection where this side is the server (natural payload roles).
+  /// [filename] is sent as-is; the receiver sanitizes it. [onProgress]
+  /// reports bytes streamed so the UI can show progress.
+  Future<void> sendFile({
+    required String filename,
+    required int size,
+    required Stream<List<int>> bytes,
+    void Function(int sent)? onProgress,
+  }) async {
+    final peerCert = peerCertDer;
+    final peerId = remoteDeviceId;
+    if (peerCert == null || peerId == null) {
+      throw StateError('not connected');
+    }
+    if (size < 0) throw ArgumentError('negative file size');
+    // Payload port: first free port in 1739-1764 like the daemon,
+    // then any ephemeral port.
+    ServerSocket? server;
+    for (var port = 1739; port <= 1764; port++) {
+      try {
+        server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+        break;
+      } on SocketException {
+        continue;
+      }
+    }
+    server ??= await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    try {
+      await sendPacket(
+        Packet(
+          id: DateTime.now().millisecondsSinceEpoch,
+          type: 'kdeconnect.share.request',
+          body: {'filename': filename},
+          payloadSize: size,
+          payloadTransferInfo: {'port': server.port},
+        ),
+      );
+      final raw = await server.first.timeout(
+        const Duration(seconds: 120),
+      );
+      final secure = await SecureSocket.secureServer(
+        raw,
+        _serverContext(peerCert),
+        requestClientCertificate: true,
+        requireClientCertificate: true,
+      ).timeout(const Duration(seconds: 10));
+      final presented = secure.peerCertificate;
+      if (presented == null) {
+        await secure.close();
+        throw const SocketException('payload peer presented no certificate');
+      }
+      final info = LocalIdentity.certInfo(presented.der);
+      if (info.commonName != peerId) {
+        await secure.close();
+        throw SocketException(
+          'payload peer CN ${info.commonName} is not $peerId',
+        );
+      }
+      var sent = 0;
+      await for (final chunk in bytes) {
+        secure.add(chunk);
+        sent += chunk.length;
+        onProgress?.call(sent);
+      }
+      await secure.flush();
+      await secure.close();
+    } finally {
+      await server.close();
+    }
+  }
+
+  /// Receive a file the peer offered with a share.request packet:
+  /// connect to its payload port as the TLS client (natural payload
+  /// roles), verify the peer certificate CN, read exactly
+  /// payloadSize bytes, and save them under [saveDir] with a
+  /// sanitized, deduplicated name. Throws when the packet carries no
+  /// payload info or the stream ends early (a partial file is deleted).
+  Future<ReceivedFile> receiveFile(Packet packet, Directory saveDir) async {
+    final peerId = remoteDeviceId;
+    final address = remoteAddress;
+    if (peerId == null || address == null) {
+      throw StateError('not connected');
+    }
+    final size = packet.payloadSize;
+    final port = (packet.payloadTransferInfo?['port'] as num?)?.toInt();
+    if (size == null || size < 0 || port == null) {
+      throw const FormatException('share.request without payload info');
+    }
+    final filename = sanitizeSharedFilename(
+      packet.body['filename'] as String?,
+    );
+    final raw = await Socket.connect(
+      address,
+      port,
+      timeout: const Duration(seconds: 10),
+    );
+    final secure = await SecureSocket.secure(
+      raw,
+      host: peerId,
+      context: _clientContext(),
+      onBadCertificate: (_) => true,
+    ).timeout(const Duration(seconds: 10));
+    final presented = secure.peerCertificate;
+    if (presented == null) {
+      await secure.close();
+      throw const SocketException('payload peer presented no certificate');
+    }
+    final info = LocalIdentity.certInfo(presented.der);
+    if (info.commonName != peerId) {
+      await secure.close();
+      throw SocketException(
+        'payload peer CN ${info.commonName} is not $peerId',
+      );
+    }
+    await saveDir.create(recursive: true);
+    final file = File(uniqueFilePath(saveDir, filename));
+    final sink = file.openWrite();
+    var remaining = size;
+    try {
+      await for (final chunk in secure) {
+        if (remaining <= 0) break;
+        final take = chunk.length <= remaining
+            ? chunk
+            : chunk.sublist(0, remaining);
+        sink.add(take);
+        remaining -= take.length;
+        if (remaining == 0) break;
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
+      await secure.close();
+    }
+    if (remaining > 0) {
+      await file.delete();
+      throw StateError(
+        'payload ended early, $remaining of $size bytes missing',
+      );
+    }
+    return ReceivedFile(
+      filename: filename,
+      path: file.path,
+      size: size,
+      deviceId: peerId,
+      deviceName: remoteName ?? '',
+      receivedAt: DateTime.now(),
+    );
   }
 
   Future<void> sendPing([String? message]) async {

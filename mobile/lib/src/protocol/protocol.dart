@@ -6,4 +6,5 @@ export 'discovery.dart';
 export 'identity.dart';
 export 'listener.dart';
 export 'packet.dart';
+export 'payload.dart';
 export 'trust_store.dart';

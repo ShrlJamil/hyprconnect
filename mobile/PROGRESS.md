@@ -327,3 +327,21 @@ CLI di desktop): pairing pertama sekarang cukup satu tap di HP.
   sekarang tidak terasa oleh pengguna.
 - Tes 105 lolos + 1 skip, analyze bersih. APK release arm64 terkirim
   ke POCO X5 lewat daemon 16:09. Vonis fisik menunggu Sahrul mencoba.
+
+## Addendum 2026-11-22 sore — sidebar + halaman perangkat bersih
+Perintah Sahrul: navigasi perangkat lewat sidebar seperti KDE Connect
+Android, subtitle ubin dihapus, perangkat luring disembunyikan, dan
+kartu info arch-acer di halaman perangkat dihapus menyisakan 6 ubin.
+- Shell baru: Drawer (header perangkat ini, daftar Peranti yang
+  paired + online/terhubung, pill "Sandingkan peranti baru",
+  Pengaturan, Tentang). Halaman perangkat jadi root dengan tombol
+  hamburger; Pengaturan menampung identitas + folder terima + log;
+  halaman sanding baru memuat perangkat yang ditemukan tapi belum
+  dipair (hanya yang online).
+- Halaman perangkat: kartu header (ikon, tipe, alamat, status)
+  dihapus; saat paired tampil hanya 6 ubin. Ubin tanpa subtitle;
+  plugin nonaktif tampil redup saja.
+- Tes: 105 lolos + 1 skip (satu tes lama menyesuaikan hilangnya teks
+  "Plugin nonaktif"; tes interop M5 sempat gagal karena presenter.json
+  daemon berisi DP-1 sisa pemakaian, sudah direset ke auto).
+- Tampil dan terverifikasi di emulator AVD lewat rig redir/forward.

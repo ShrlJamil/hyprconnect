@@ -1,11 +1,11 @@
-//! HyprConnect mobile — M2: M1 shell plus file sharing and clipboard
-//! (see lib/src/ui/share_page.dart and clipboard_page.dart). The
-//! protocol foundation (identity, discovery, TLS, pairing, ping) is M0;
-//! the remaining tiles' features land in M3-M5.
+//! HyprConnect mobile. The root is a KDE Connect style shell: a
+//! navigation drawer (see app_drawer.dart) switches between paired
+//! devices, each shown as a device page; pairing a new device,
+//! settings and about live behind the drawer too.
 
 import 'package:flutter/material.dart';
 
-import 'src/protocol/protocol.dart';
+import 'src/ui/app_drawer.dart';
 import 'src/ui/app_state.dart';
 import 'src/ui/device_page.dart';
 
@@ -38,6 +38,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final AppState _appState;
+  String? _selectedDeviceId;
 
   @override
   void initState() {
@@ -52,133 +53,82 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  bool _isPaired(DeviceListEntry entry) {
+    final conn = _appState.connectionFor(entry.deviceId);
+    return entry.trusted || (conn?.isPaired ?? false);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _appState,
       builder: (context, _) {
-        final identity = _appState.identity;
-        final entries = _appState.entries;
-        return Scaffold(
-          appBar: AppBar(title: const Text('HyprConnect')),
-          body: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Card(
-                child: ListTile(
-                  leading: const Icon(Icons.smartphone, size: 36),
-                  title: const Text('Perangkat ini'),
-                  subtitle: identity == null
-                      ? Text(_appState.status)
-                      : SelectableText(
-                          '${identity.deviceName}\n'
-                          '${identity.deviceId}\n${_appState.status}',
-                        ),
+        final paired = _appState.entries
+            .where(_isPaired)
+            .where(
+              (entry) =>
+                  entry.online ||
+                  _appState.connectionFor(entry.deviceId) != null,
+            )
+            .toList();
+        DeviceListEntry? selected;
+        for (final entry in paired) {
+          if (entry.deviceId == _selectedDeviceId) {
+            selected = entry;
+            break;
+          }
+        }
+        selected ??= paired.isNotEmpty ? paired.first : null;
+        final drawer = AppDrawer(
+          appState: _appState,
+          selectedDeviceId: selected?.deviceId,
+          onSelectDevice: (id) => setState(() => _selectedDeviceId = id),
+        );
+        if (selected == null) {
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('HyprConnect'),
+              leading: Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu),
+                  tooltip: 'Peranti',
+                  onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Perangkat (${entries.length})',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              if (entries.isEmpty)
-                const ListTile(
-                  title: Text('Belum ada perangkat di jaringan ini'),
-                  subtitle: Text(
-                    'Pastikan desktop dan HP berada di Wi-Fi yang sama.',
-                  ),
-                ),
-              for (final entry in entries)
-                _DeviceRow(
-                  entry: entry,
-                  appState: _appState,
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (context) => DevicePage(
-                          appState: _appState,
-                          entry: entry,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              const SizedBox(height: 16),
-              ExpansionTile(
-                title: const Text('Log'),
-                children: [
-                  Container(
-                    height: 220,
-                    padding: const EdgeInsets.all(8),
-                    child: ListView(
-                      children: [
-                        for (final line in _appState.log)
-                          Text(
-                            line,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                      ],
+            ),
+            drawer: drawer,
+            body: const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.devices, size: 56),
+                    SizedBox(height: 12),
+                    Text(
+                      'Belum ada peranti yang disandingkan.',
+                      textAlign: TextAlign.center,
                     ),
-                  ),
-                ],
+                    SizedBox(height: 8),
+                    Text(
+                      'Buka sidebar lalu pilih Sandingkan peranti baru '
+                      'untuk menghubungkan desktop pertamamu.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
+            ),
+          );
+        }
+        return DevicePage(
+          key: ValueKey(selected.deviceId),
+          appState: _appState,
+          entry: selected,
+          isRoot: true,
+          drawer: drawer,
         );
       },
-    );
-  }
-}
-
-class _DeviceRow extends StatelessWidget {
-  final DeviceListEntry entry;
-  final AppState appState;
-  final VoidCallback onTap;
-
-  const _DeviceRow({
-    required this.entry,
-    required this.appState,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final conn = appState.connectionFor(entry.deviceId);
-    final paired = conn?.isPaired ?? false;
-    final pendingIn =
-        conn != null &&
-        conn.pairState == PairState.pendingIn;
-    final status = !entry.online
-        ? 'Luring'
-        : conn == null
-        ? 'Ditemukan'
-        : paired
-        ? 'Terhubung, paired'
-        : pendingIn
-        ? 'Minta pairing, cek kunci'
-        : 'Terhubung, belum dipair';
-    return Card(
-      child: ListTile(
-        leading: Icon(
-          entry.deviceType.contains('phone')
-              ? Icons.smartphone
-              : Icons.desktop_windows,
-          size: 32,
-        ),
-        title: Text(
-          entry.name.isEmpty ? entry.deviceId : entry.name,
-        ),
-        subtitle: Text(
-          '${entry.deviceType} - $status'
-          '${entry.trusted && !paired ? ' - pernah dipair' : ''}',
-        ),
-        trailing: paired
-            ? const Icon(Icons.check_circle, color: Colors.green)
-            : pendingIn
-            ? const Icon(Icons.mark_email_unread, color: Colors.orange)
-            : null,
-        onTap: onTap,
-      ),
     );
   }
 }

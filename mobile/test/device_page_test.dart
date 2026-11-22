@@ -111,7 +111,10 @@ void main() {
       _wrap(DevicePage(appState: state, entry: entry)),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Plugin nonaktif'), findsOneWidget);
+    // Tiles no longer carry subtitles (removed on request); a
+    // switched-off plugin shows as a dimmed tile with no caption.
+    expect(find.text('Plugin nonaktif'), findsNothing);
+    expect(find.text('Kirim file'), findsOneWidget);
   });
 
   testWidgets('encryption info page shows peer id and no-connection state',

@@ -36,20 +36,25 @@ IconData _tileIcon(String pluginId) {
   };
 }
 
-IconData _deviceIcon(String deviceType) {
-  final type = deviceType.toLowerCase();
-  if (type.contains('laptop')) return Icons.laptop;
-  if (type.contains('phone')) return Icons.smartphone;
-  if (type.contains('tablet')) return Icons.tablet;
-  if (type.contains('tv')) return Icons.tv;
-  return Icons.desktop_windows;
-}
-
 class DevicePage extends StatefulWidget {
   final AppState appState;
   final DeviceListEntry entry;
 
-  const DevicePage({super.key, required this.appState, required this.entry});
+  /// Drawer shown when this page is the app root (KDE Connect style
+  /// sidebar navigation); null when pushed above another page.
+  final Widget? drawer;
+
+  /// True when this page is the root page: the app bar leads with the
+  /// drawer button instead of a back button.
+  final bool isRoot;
+
+  const DevicePage({
+    super.key,
+    required this.appState,
+    required this.entry,
+    this.drawer,
+    this.isRoot = false,
+  });
 
   @override
   State<DevicePage> createState() => _DevicePageState();
@@ -187,20 +192,6 @@ class _DevicePageState extends State<DevicePage> {
     );
   }
 
-  String _statusText(DeviceConnection? conn) {
-    if (conn == null) {
-      return _entry.online
-          ? 'Ditemukan, belum terhubung'
-          : 'Luring, terakhir dikenal';
-    }
-    if (conn.isPaired) return 'Terhubung dan dipair';
-    return switch (conn.pairState) {
-      PairState.pendingIn => 'Menunggu jawaban pairing',
-      PairState.pendingOut => 'Permintaan pairing terkirim',
-      _ => 'Terhubung, belum dipair',
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -213,8 +204,19 @@ class _DevicePageState extends State<DevicePage> {
         final connected = conn != null && conn.isConnected;
         final name = _entry.name.isEmpty ? _entry.deviceId : _entry.name;
         return Scaffold(
+          drawer: widget.drawer,
           appBar: AppBar(
             title: Text(name),
+            automaticallyImplyLeading: !widget.isRoot,
+            leading: widget.isRoot
+                ? Builder(
+                    builder: (context) => IconButton(
+                      icon: const Icon(Icons.menu),
+                      tooltip: 'Peranti',
+                      onPressed: () => Scaffold.of(context).openDrawer(),
+                    ),
+                  )
+                : null,
             actions: [
               PopupMenuButton<String>(
                 tooltip: 'Menu perangkat',
@@ -275,18 +277,6 @@ class _DevicePageState extends State<DevicePage> {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Card(
-                child: ListTile(
-                  leading: Icon(_deviceIcon(_entry.deviceType), size: 36),
-                  title: Text(name),
-                  subtitle: Text(
-                    '${_entry.deviceType}'
-                    '${_entry.address == null ? '' : ' - ${_entry.address!.address}'}\n'
-                    '${_statusText(conn)}',
-                  ),
-                  isThreeLine: true,
-                ),
-              ),
               if (pendingIn && conn != null) ...[
                 const SizedBox(height: 8),
                 Card(

@@ -2683,10 +2683,16 @@ async fn connect_to(daemon: Arc<Daemon>, device_id: String, ip: IpAddr, port: u1
 async fn maybe_connect(daemon: &Arc<Daemon>, device_id: &str) {
     let target = {
         let mut inner = daemon.inner.lock().await;
-        let trusted = inner.trust.is_trusted(device_id);
+        // Connect back to unpaired devices too, not just trusted
+        // ones: a phone that has never paired cannot open the channel
+        // itself in the TLS-server role without knowing this device's
+        // certificate, so first pairing starts with this device
+        // connecting to the phone's listener when it is heard on
+        // discovery. The channel stays inert until pairing is
+        // explicitly accepted here; every feature stays gated on the
+        // paired state, like kdeconnectd linking to discovered peers.
         let dev = inner.devices.get(device_id);
-        let ready = trusted
-            && dev.map(|d| !d.connected).unwrap_or(false)
+        let ready = dev.map(|d| !d.connected).unwrap_or(false)
             && !inner.connecting.contains(device_id);
         match (ready, dev) {
             (true, Some(d)) => match (d.last_ip, d.last_tcp_port) {

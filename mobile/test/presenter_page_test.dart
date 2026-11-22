@@ -110,7 +110,7 @@ void main() {
     expect(find.text('Berikutnya'), findsOneWidget);
     expect(find.byIcon(Icons.gps_fixed), findsOneWidget);
     expect(find.byTooltip('Layar penuh'), findsOneWidget);
-    expect(find.byTooltip('Tutup remote'), findsOneWidget);
+    expect(find.byTooltip('Kembali'), findsOneWidget);
     // Notes are empty: create and open-file buttons, no counter.
     expect(find.byTooltip('Buat catatan'), findsOneWidget);
     expect(find.byTooltip('Buka file catatan'), findsOneWidget);

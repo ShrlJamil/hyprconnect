@@ -189,15 +189,15 @@ class _PresenterPageState extends State<PresenterPage> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          icon: Icon(_fullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
-          tooltip: 'Layar penuh',
-          onPressed: _toggleFullscreen,
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Kembali',
+          onPressed: _close,
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.link_off),
-            tooltip: 'Tutup remote',
-            onPressed: _close,
+            icon: Icon(_fullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
+            tooltip: 'Layar penuh',
+            onPressed: _toggleFullscreen,
           ),
         ],
       ),

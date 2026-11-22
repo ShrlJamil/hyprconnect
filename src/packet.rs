@@ -58,6 +58,7 @@ pub const OUTGOING_CAPABILITIES: &[&str] = &[
     "kdeconnect.runcommand",
     "kdeconnect.runcommand.output",
     "kdeconnect.mousepad.request",
+    "kdeconnect.presenter",
 ];
 
 pub fn now_ms() -> i64 {

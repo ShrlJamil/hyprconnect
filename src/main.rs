@@ -492,7 +492,7 @@ impl Daemon {
                         .unwrap_or(false)
                 };
                 if paired {
-                    self.handle_presenter(&packet.body).await;
+                    self.handle_presenter(device_id, &packet.body).await;
                 }
             }
             "kdeconnect.mousepad.request" => {
@@ -4425,7 +4425,62 @@ impl Daemon {
         }
     }
 
-    async fn handle_presenter(self: &Arc<Self>, body: &Value) {
+    /// kdeconnect.presenter, the presentation remote.
+    ///
+    /// Stock shapes (dx/dy pointer deltas, stop) are untouched. The
+    /// monitor extension is additive: the phone may ask for the
+    /// monitor list ("requestMonitorList": true) or pin the presenter
+    /// pointer to one monitor ("setMonitor": "<name>", "" for
+    /// automatic); the daemon answers with a kdeconnect.presenter
+    /// packet carrying "monitors" and "presenterMonitor". Stock
+    /// clients never send these fields and never receive the reply,
+    /// so they are unaffected.
+    /// Reply to one device with the current monitor list and the
+    /// pinned presenter monitor (None = automatic). Best effort: a
+    /// disconnected device or a disabled presenter plugin just drops it.
+    async fn send_presenter_monitors(self: &Arc<Self>, device_id: &str) {
+        let monitor = {
+            let inner = self.inner.lock().await;
+            inner.presenter_monitor.clone()
+        };
+        let monitors = hypr_monitor_names().await;
+        self.send_packet(
+            device_id,
+            Packet::new(
+                "kdeconnect.presenter",
+                json!({
+                    "monitors": monitors,
+                    "presenterMonitor": monitor,
+                }),
+            ),
+        )
+        .await;
+    }
+
+    async fn handle_presenter(self: &Arc<Self>, device_id: &str, body: &Value) {
+        if body["requestMonitorList"].as_bool() == Some(true) {
+            self.send_presenter_monitors(device_id).await;
+            return;
+        }
+        if let Some(name) = body["setMonitor"].as_str() {
+            let trimmed = name.trim();
+            let value = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+            {
+                let mut inner = self.inner.lock().await;
+                inner.presenter_monitor = value.clone();
+            }
+            save_presenter_monitor(&self.state, value.as_deref());
+            log(&format!(
+                "presenter monitor set to {}",
+                value.as_deref().unwrap_or("auto")
+            ));
+            self.send_presenter_monitors(device_id).await;
+            return;
+        }
         if body["stop"].as_bool() == Some(true) {
             let mut inner = self.inner.lock().await;
             if inner.presenter.session {

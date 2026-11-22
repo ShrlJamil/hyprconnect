@@ -29,6 +29,7 @@ import 'mousepad.dart';
 import 'runcommand.dart';
 import 'packet.dart';
 import 'payload.dart';
+import 'presenter.dart';
 import 'trust_store.dart';
 
 enum PairState { unknown, unpaired, pendingOut, pendingIn, paired }
@@ -608,6 +609,33 @@ class DeviceConnection {
     MousepadModifiers modifiers = const MousepadModifiers(),
   ]) async {
     await sendPacket(mousepadSpecialKey(code, modifiers));
+  }
+
+  /// Presentation remote (M5): move the presenter dot by a relative
+  /// delta (fractions of the session monitor). The first delta
+  /// starts the session on the desktop.
+  Future<void> sendPresenterMove(double dx, double dy) async {
+    await sendPacket(presenterMove(dx, dy));
+  }
+
+  /// End the presenter session and hide the dot.
+  Future<void> sendPresenterStop() async {
+    await sendPacket(presenterStop());
+  }
+
+  /// Ask the desktop for its monitor list (HyprConnect extension).
+  /// The answer arrives as a kdeconnect.presenter packet with
+  /// "monitors" and "presenterMonitor"; a stock desktop never
+  /// answers, and the caller just keeps the picker hidden.
+  Future<void> requestPresenterMonitors() async {
+    await sendPacket(presenterRequestMonitorList());
+  }
+
+  /// Pin the presenter pointer to one monitor (HyprConnect
+  /// extension). Null means automatic. The daemon answers with the
+  /// updated monitor list packet.
+  Future<void> setPresenterMonitor(String? monitor) async {
+    await sendPacket(presenterSetMonitor(monitor));
   }
 
   /// Receive a payload the peer offered (album art, or any packet

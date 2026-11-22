@@ -8,6 +8,7 @@
 //! this class only wires it to the UI.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -77,6 +78,12 @@ class AppState extends ChangeNotifier {
   final Map<String, String> _selectedPlayers = {};
   final Map<String, String> _albumArtPaths = {};
   final Set<String> _artRequested = {};
+  // M5: per-device presenter state (deviceId -> ...).
+  final Map<String, List<String>> _monitorLists = {};
+  final Map<String, String?> _presenterMonitors = {};
+  // M5: presenter notes, kept on this phone only (deviceId -> text).
+  final Map<String, String> _presenterNotes = {};
+  File? _notesFile;
   // M3: per-device run-command state (deviceId -> ...).
   final Map<String, List<RunCommand>> _commandLists = {};
   final Map<String, bool> _canAddCommands = {};
@@ -151,6 +158,28 @@ class AppState extends ChangeNotifier {
   /// M3: id of the command currently running on a device, if any.
   int? runningCommandIdFor(String deviceId) => _runningCommandIds[deviceId];
 
+  /// M5: monitor names the desktop reported (empty when it never
+  /// answered the request — a stock desktop never does).
+  List<String> monitorListFor(String deviceId) {
+    return List.unmodifiable(_monitorLists[deviceId] ?? const []);
+  }
+
+  /// M5: whether the desktop answered the monitor list at all.
+  bool hasMonitorListFor(String deviceId) {
+    return _monitorLists.containsKey(deviceId);
+  }
+
+  /// M5: the monitor the presenter pointer is pinned to, or null
+  /// for automatic (also null when nothing was ever reported).
+  String? presenterMonitorFor(String deviceId) {
+    return _presenterMonitors[deviceId];
+  }
+
+  /// M5: presenter notes stored on this phone for a device.
+  String presenterNotesFor(String deviceId) {
+    return _presenterNotes[deviceId] ?? '';
+  }
+
   DeviceConnection? connectionFor(String deviceId) {
     return _connections[deviceId];
   }
@@ -221,6 +250,8 @@ class AppState extends ChangeNotifier {
       _receiveDir = await _resolveReceiveDir();
       _artDir = Directory('${appDir.path}/album-art');
       await _artDir!.create(recursive: true);
+      _notesFile = File('${appDir.path}/presenter_notes.json');
+      await _loadPresenterNotes();
       final listener = TcpListener();
       final port = await listener.start();
       final discovery = Discovery(identity: identity, tcpPort: port);
@@ -264,6 +295,26 @@ class AppState extends ChangeNotifier {
     return dir;
   }
 
+  /// M5: presenter notes live in presenter_notes.json under the app
+  /// documents dir; a missing or broken file just means no notes yet.
+  Future<void> _loadPresenterNotes() async {
+    final file = _notesFile;
+    if (file == null) return;
+    try {
+      if (!await file.exists()) return;
+      final raw = jsonDecode(await file.readAsString());
+      if (raw is Map) {
+        for (final entry in raw.entries) {
+          if (entry.value is String) {
+            _presenterNotes[entry.key as String] = entry.value as String;
+          }
+        }
+      }
+    } catch (_) {
+      // Notes are a convenience; never block startup over them.
+    }
+  }
+
   /// Handle one packet that arrived on [conn]: ping logging, clipboard
   /// receive (sets the phone clipboard), and share requests (text and
   /// url like the daemon handles them; files are downloaded to the
@@ -290,6 +341,8 @@ class AppState extends ChangeNotifier {
           _handleRunCommandList(conn, packet);
         case 'kdeconnect.runcommand.output':
           _handleRunCommandOutput(conn, packet);
+        case 'kdeconnect.presenter':
+          _handlePresenter(conn, packet);
       }
     } catch (e) {
       _logLine('Gagal menangani ${packet.type}: $e');
@@ -392,6 +445,22 @@ class AppState extends ChangeNotifier {
       default:
         break;
     }
+  }
+
+  /// M5: a kdeconnect.presenter reply arrived (monitor list).
+  /// Pointer packets never come back, so anything without
+  /// "monitors" is ignored.
+  void _handlePresenter(DeviceConnection conn, Packet packet) {
+    final deviceId = conn.remoteDeviceId;
+    if (deviceId == null) return;
+    final list = PresenterMonitorList.fromPacket(packet);
+    if (list == null) return;
+    _monitorLists[deviceId] = list.monitors;
+    _presenterMonitors[deviceId] = list.presenterMonitor;
+    _logLine(
+      'Daftar monitor diterima dari ${conn.remoteName} '
+      '(${list.monitors.length} monitor)',
+    );
   }
 
   /// Clipboard text arrived from a peer: set the phone clipboard,
@@ -777,6 +846,98 @@ class AppState extends ChangeNotifier {
       await conn.sendMousepadSpecialKey(code, modifiers);
     } catch (e) {
       _logLine('Tombol khusus gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M5: move the presenter dot by a relative delta (fractions of
+  /// the session monitor). High-frequency traffic: successes stay
+  /// silent, failures are logged.
+  Future<void> sendPresenterMove(
+    String deviceId,
+    double dx,
+    double dy,
+  ) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendPresenterMove(dx, dy);
+    } catch (e) {
+      _logLine('Gerak pointer presenter gagal: $e');
+    }
+  }
+
+  /// M5: end the presenter session and hide the dot.
+  Future<void> stopPresenter(String deviceId) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendPresenterStop();
+    } catch (e) {
+      _logLine('Berhenti presenter gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M5: ask the desktop for its monitor list (HyprConnect
+  /// extension; a stock desktop never answers).
+  Future<void> requestPresenterMonitors(String deviceId) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.requestPresenterMonitors();
+    } catch (e) {
+      _logLine('Gagal meminta daftar monitor: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M5: pin the presenter pointer to one monitor (null = automatic).
+  /// The stored value updates right away; the daemon confirms it by
+  /// answering with the updated monitor list packet.
+  Future<void> setPresenterMonitor(String deviceId, String? monitor) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    _presenterMonitors[deviceId] = monitor;
+    try {
+      await conn.setPresenterMonitor(monitor);
+    } catch (e) {
+      _logLine('Pilih monitor presenter gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// M5: next slide (stock: mousepad specialKey 9, PageDown).
+  Future<void> presenterNext(String deviceId) async {
+    await sendMousepadSpecialKey(deviceId, PresenterKeys.next);
+  }
+
+  /// M5: previous slide (stock: mousepad specialKey 8, PageUp).
+  Future<void> presenterPrevious(String deviceId) async {
+    await sendMousepadSpecialKey(deviceId, PresenterKeys.previous);
+  }
+
+  /// M5: start fullscreen (stock: mousepad specialKey 25, F5).
+  Future<void> presenterFullscreen(String deviceId) async {
+    await sendMousepadSpecialKey(deviceId, PresenterKeys.fullscreen);
+  }
+
+  /// M5: exit the presentation (stock: mousepad specialKey 14, Esc).
+  Future<void> presenterEscape(String deviceId) async {
+    await sendMousepadSpecialKey(deviceId, PresenterKeys.escape);
+  }
+
+  /// M5: save presenter notes for a device, on this phone only.
+  /// Without a notes file (tests) the text is kept in memory.
+  Future<void> savePresenterNotes(String deviceId, String text) async {
+    _presenterNotes[deviceId] = text;
+    final file = _notesFile;
+    if (file != null) {
+      try {
+        await file.writeAsString(jsonEncode(_presenterNotes));
+      } catch (e) {
+        _logLine('Simpan catatan presenter gagal: $e');
+      }
     }
     notifyListeners();
   }

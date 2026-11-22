@@ -38,6 +38,7 @@ dependencies:
   path_provider: ^2.1.6
   crypto: ^3.0.8
   file_picker: ^13.4.1
+  sensors_plus: ^7.1.1
 
 dev_dependencies:
   flutter_test:

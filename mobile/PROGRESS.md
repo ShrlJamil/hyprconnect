@@ -172,12 +172,41 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
       Scrollable internal TextField); (4) jalur tombol dibuktikan
       tanpa efek samping: specialKey tak dikenal hanya dicatat
       daemon, jadi dipakai sebagai probe.
-- [ ] M5 Presentation remote with HyprPresenter parity: gyro and drag
+- [x] M5 Presentation remote with HyprPresenter parity: gyro and drag
       pointer (kdeconnect.presenter), next/previous, monitor selection
       (additive daemon extension: the app may ask for the monitor list
       and set the presenter monitor; stock clients unaffected), presenter
       notes stored locally on the phone and shown on the presenter
       screen.
+      SELESAI 2026-11-22 15:15. Bukti: `flutter test --concurrency=1`
+      105/105 lolos + 1 skip wajar (tes interop M3 tanpa fixture mpv);
+      `flutter analyze` bersih; `flutter build apk --debug` berhasil
+      (mobile/build/app/outputs/flutter-apk/app-debug.apk, 182 MB).
+      Bukti hidup dari log daemon (15:12:07-08): `presenter session
+      started on DP-1`, `presenter session stopped`, `presenter monitor
+      set to DP-1`, `presenter monitor set to auto`; presenter.json
+      kembali `{"monitor": null}` setelah tes. Daemon DIUBAH secara
+      aditif saja (ekstensi monitor di handle_presenter + presenter di
+      OUTGOING_CAPABILITIES); paket dx/dy/stop dan semua perilaku lama
+      tidak disentuh; tes interop M0/M2/M3/M4 tetap lolos melawan
+      daemon yang sedang jalan (systemd active, port 1714 listen).
+      Catatan penting: (1) tombol next/previous TIDAK dibuktikan lewat
+      jurnal — daemon tidak mencatat specialKey yang dikenal (hanya
+      yang tak dikenal, seperti probe 999 di M4); keduanya dikirim
+      lewat kanal TLS live lalu kanal dibuktikan sehat dengan ping,
+      dan bentuk paketnya dibuktikan tes unit + widget lewat koneksi
+      perekam — aturan kejujuran yang sama seperti klik di M4;
+      (2) gyro memakai pemetaan persis aplikasi bawaan (dx = -gyroZ *
+      0,036, dy = -gyroX * 0,036) dengan `sensors_plus` 7.1.1 (pub.dev
+      publik); (3) `cp` biner daemon yang sedang jalan gagal
+      "Text file busy" — deploy yang benar: stop service lewat
+      compositor, salin, start lagi lewat compositor; (4) pembacaan
+      journalctl di tes dibuat tahan-gagal-sementara (gagal baca =
+      "belum", bukan gagal tes) setelah satu kegagalan pertama yang
+      tidak terjelaskan saat run pertama; (5) dua perangkat tes
+      "HyprConnect Test" yang tertinggal di daftar daemon sudah
+      di-unpair (paired=false), hanya entri riwayat yang memang
+      disimpan daemon.
 
 ## Log
 
@@ -259,9 +288,24 @@ Autonomous build session ordered by Sahrul on 2026-11-22, time-boxed until
   test/mousepad_test.dart (14), test/remote_input_page_test.dart
   (12 widget, koneksi perekam), test/interop_m4_test.dart (1 live).
   Daemon TIDAK diubah.
-- Next step: M5 — Presentation remote dengan paritas HyprPresenter:
-  pointer gyro dan seret (kdeconnect.presenter), next/previous,
-  pemilihan monitor (ekstensi daemon aditif: app boleh meminta daftar
-  monitor dan memilih monitor presenter; klien bawaan tidak
-  terpengaruh), catatan presenter tersimpan lokal di HP dan tampil di
-  layar presenter.
+- SEMUA FASE SELESAI (M0-M5) 2026-11-22 15:15, sebelum batas 17:00.
+  Tidak ada langkah berikutnya di sesi ini; laporan akhir dikirim
+  dan jadwal build ini dihapus.
+- 2026-11-22 15:15 M5 selesai (lihat centang di atas). Daemon:
+  src/main.rs (handle_presenter kini menerima device_id + menangani
+  requestMonitorList/setMonitor dengan balasan monitor list, plus
+  helper send_presenter_monitors) dan src/packet.rs (presenter masuk
+  OUTGOING_CAPABILITIES); biner release di-deploy ke ~/.local/bin/
+  hyprconnect, service di-restart lewat compositor (stop-sal-in-start;
+  active, port 1714 listen). File baru: mobile/lib/src/protocol/
+  presenter.dart (builder move/stop/request/set + parse monitor list +
+  pemetaan gyro), mobile/lib/src/ui/presenter_page.dart (pad seret +
+  gyro + tombol slide + picker monitor + catatan), mobile/test/
+  presenter_test.dart (15), test/presenter_page_test.dart (9 widget),
+  test/interop_m5_test.dart (1 live). Perubahan app: DeviceConnection
+  .sendPresenterMove/Stop/requestPresenterMonitors/setPresenterMonitor,
+  AppState menangani kdeconnect.presenter masuk + state monitor
+  per-perangkat + wrapper M5 + catatan di presenter_notes.json,
+  Capabilities.incoming kini menerima kdeconnect.presenter, ubin
+  Presentation remote membuka halaman sungguhan. Dependensi baru:
+  sensors_plus ^7.1.1 (pub.dev publik).

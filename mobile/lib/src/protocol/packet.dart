@@ -22,6 +22,7 @@ class Capabilities {
     'kdeconnect.findmyphone.request',
     'kdeconnect.runcommand',
     'kdeconnect.mousepad.request',
+    'kdeconnect.presenter',
   ];
 
   /// Types the phone sends.

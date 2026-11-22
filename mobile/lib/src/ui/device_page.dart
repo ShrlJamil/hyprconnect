@@ -21,6 +21,7 @@ import 'multimedia_page.dart';
 import 'runcommand_page.dart';
 import 'remote_input_page.dart';
 import 'plugin_settings_page.dart';
+import 'presenter_page.dart';
 import 'share_page.dart';
 
 IconData _tileIcon(String pluginId) {
@@ -170,6 +171,15 @@ class _DevicePageState extends State<DevicePage> {
         MaterialPageRoute<void>(
           builder: (context) =>
               ClipboardPage(appState: _appState, entry: _entry),
+        ),
+      );
+      return;
+    }
+    if (pluginId == 'presenter') {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) =>
+              PresenterPage(appState: _appState, entry: _entry),
         ),
       );
       return;

@@ -1,15 +1,20 @@
-//! M3: control the desktop's media players (kdeconnect.mpris).
-//! The page asks for the player list on open; the daemon pushes a
-//! fresh state packet after every action, so the display follows
+//! M3: control the desktop's media players (kdeconnect.mpris) and
+//! its audio outputs (kdeconnect.systemvolume). The page asks for
+//! the player list and the sink list on open; the daemon pushes
+//! fresh state packets after every action, so the display follows
 //! the desktop without polling. Album art, when the daemon offers
 //! a file:// url, is pulled once and shown from the app's art dir.
 //!
-//! Layout follows the KDE Connect app's two tabs: "Putar" carries
-//! the artwork, track info, seek bar, a wide play/pause button, a
-//! Previous/Stop/Next row and the volume slider; "Peranti" picks
-//! which player to control. With no player at all, Putar shows the
-//! same skeleton greyed out under a big music note, like the stock
-//! app's empty state. Colours are the app's own theme.
+//! Layout follows the KDE Connect app: the "Putar" tab carries the
+//! artwork, a player dropdown under it, the track title, a wide
+//! play/pause button, a transport row (seek buttons join when the
+//! player can seek), the seek bar with both times, and the player
+//! volume. The "Peranti" tab is NOT a player picker: it lists the
+//! desktop's audio outputs, the selected one being the default
+//! sink, each with its own global volume slider. With no player
+//! at all, Putar shows the same skeleton greyed out under a big
+//! music note, like the stock app's empty state. Colours are the
+//! app's own theme.
 
 import 'dart:io';
 
@@ -44,6 +49,7 @@ class _MultimediaPageState extends State<MultimediaPage>
   late final TabController _tabs = TabController(length: 2, vsync: this);
   double? _dragPos;
   double? _dragVolume;
+  final Map<String, double> _dragSinkVolumes = {};
 
   AppState get _appState => widget.appState;
   DeviceListEntry get _entry => widget.entry;
@@ -52,12 +58,18 @@ class _MultimediaPageState extends State<MultimediaPage>
   void initState() {
     super.initState();
     _appState.requestMprisPlayers(_entry.deviceId);
+    _appState.requestSinks(_entry.deviceId);
   }
 
   @override
   void dispose() {
     _tabs.dispose();
     super.dispose();
+  }
+
+  void _refresh() {
+    _appState.requestMprisPlayers(_entry.deviceId);
+    _appState.requestSinks(_entry.deviceId);
   }
 
   @override
@@ -74,6 +86,7 @@ class _MultimediaPageState extends State<MultimediaPage>
         final artPath = selected == null
             ? null
             : _appState.albumArtPathFor(_entry.deviceId, selected);
+        final sinks = _appState.sinksFor(_entry.deviceId);
         return Scaffold(
           appBar: AppBar(
             title: Column(
@@ -90,9 +103,9 @@ class _MultimediaPageState extends State<MultimediaPage>
             ),
             actions: [
               IconButton(
-                tooltip: 'Muat ulang daftar player',
+                tooltip: 'Muat ulang',
                 icon: const Icon(Icons.refresh),
-                onPressed: () => _appState.requestMprisPlayers(_entry.deviceId),
+                onPressed: _refresh,
               ),
             ],
             bottom: conn == null
@@ -110,8 +123,8 @@ class _MultimediaPageState extends State<MultimediaPage>
               : TabBarView(
                   controller: _tabs,
                   children: [
-                    _playTab(players, state, artPath),
-                    _devicesTab(players, selected),
+                    _playTab(players, selected, state, artPath),
+                    _devicesTab(sinks),
                   ],
                 ),
         );
@@ -125,6 +138,7 @@ class _MultimediaPageState extends State<MultimediaPage>
 
   Widget _playTab(
     List<String> players,
+    String? selected,
     MprisPlayerState? state,
     String? artPath,
   ) {
@@ -133,17 +147,19 @@ class _MultimediaPageState extends State<MultimediaPage>
       child: Column(
         children: [
           Expanded(
-            child: state == null ? _emptyCentre(players) : _artwork(artPath),
+            child: state == null && players.isEmpty
+                ? _emptyCentre(players)
+                : _artwork(artPath),
           ),
-          if (state != null) ...[
-            _trackInfo(state),
-            const SizedBox(height: 8),
-            _seek(state),
-            const SizedBox(height: 12),
+          if (players.isNotEmpty) ...[
+            _playerDropdown(players, selected),
+            const SizedBox(height: 4),
           ],
+          if (state != null) ...[_trackInfo(state), const SizedBox(height: 12)],
           _widePlayButton(state),
           const SizedBox(height: 12),
           _transportRow(state),
+          if (state != null) ...[const SizedBox(height: 8), _seek(state)],
           const SizedBox(height: 8),
           _volumeRow(state),
         ],
@@ -203,6 +219,32 @@ class _MultimediaPageState extends State<MultimediaPage>
     );
   }
 
+  /// Pick the controlled player, under the artwork like the stock
+  /// app (and the desktop panel) do it.
+  Widget _playerDropdown(List<String> players, String? selected) {
+    return SizedBox(
+      width: double.infinity,
+      child: DropdownButton<String>(
+        value: players.contains(selected) ? selected : players.first,
+        isExpanded: true,
+        underline: const SizedBox.shrink(),
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontWeight: FontWeight.w600,
+        ),
+        items: [
+          for (final name in players)
+            DropdownMenuItem(value: name, child: Text(name)),
+        ],
+        onChanged: (name) {
+          if (name != null) {
+            _appState.selectMprisPlayer(_entry.deviceId, name);
+          }
+        },
+      ),
+    );
+  }
+
   Widget _trackInfo(MprisPlayerState state) {
     final theme = Theme.of(context);
     return Align(
@@ -235,32 +277,6 @@ class _MultimediaPageState extends State<MultimediaPage>
             ),
         ],
       ),
-    );
-  }
-
-  Widget _seek(MprisPlayerState state) {
-    final length = state.lengthMs;
-    final pos = _dragPos ?? state.posMs.toDouble();
-    return Column(
-      children: [
-        Slider(
-          value: length > 0 ? pos.clamp(0, length.toDouble()) : 0,
-          max: length > 0 ? length.toDouble() : 1,
-          onChanged: state.canSeek
-              ? (value) => setState(() => _dragPos = value)
-              : null,
-          onChangeEnd: state.canSeek
-              ? (value) {
-                  setState(() => _dragPos = null);
-                  _appState.setMprisPosition(_entry.deviceId, value ~/ 1000);
-                }
-              : null,
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [Text(_formatMs(pos.toInt())), Text(_formatMs(length))],
-        ),
-      ],
     );
   }
 
@@ -316,6 +332,7 @@ class _MultimediaPageState extends State<MultimediaPage>
       );
     }
 
+    final canSeek = state?.canSeek ?? false;
     return Row(
       children: [
         button(
@@ -324,6 +341,15 @@ class _MultimediaPageState extends State<MultimediaPage>
           enabled: state?.canGoPrevious ?? false,
           action: () => _appState.sendMprisAction(_entry.deviceId, 'Previous'),
         ),
+        if (canSeek) ...[
+          const SizedBox(width: 12),
+          button(
+            tooltip: 'Mundur 10 detik',
+            icon: Icons.fast_rewind,
+            enabled: true,
+            action: () => _appState.seekMpris(_entry.deviceId, -10),
+          ),
+        ],
         const SizedBox(width: 12),
         button(
           tooltip: 'Berhenti',
@@ -331,12 +357,51 @@ class _MultimediaPageState extends State<MultimediaPage>
           enabled: state != null,
           action: () => _appState.sendMprisAction(_entry.deviceId, 'Stop'),
         ),
+        if (canSeek) ...[
+          const SizedBox(width: 12),
+          button(
+            tooltip: 'Maju 10 detik',
+            icon: Icons.fast_forward,
+            enabled: true,
+            action: () => _appState.seekMpris(_entry.deviceId, 10),
+          ),
+        ],
         const SizedBox(width: 12),
         button(
           tooltip: 'Berikutnya',
           icon: Icons.skip_next,
           enabled: state?.canGoNext ?? false,
           action: () => _appState.sendMprisAction(_entry.deviceId, 'Next'),
+        ),
+      ],
+    );
+  }
+
+  /// Seek bar with the current time and the total flanking it.
+  Widget _seek(MprisPlayerState state) {
+    final length = state.lengthMs;
+    final pos = _dragPos ?? state.posMs.toDouble();
+    return Row(
+      children: [
+        SizedBox(width: 44, child: Text(_formatMs(pos.toInt()))),
+        Expanded(
+          child: Slider(
+            value: length > 0 ? pos.clamp(0, length.toDouble()) : 0,
+            max: length > 0 ? length.toDouble() : 1,
+            onChanged: state.canSeek
+                ? (value) => setState(() => _dragPos = value)
+                : null,
+            onChangeEnd: state.canSeek
+                ? (value) {
+                    setState(() => _dragPos = null);
+                    _appState.setMprisPosition(_entry.deviceId, value ~/ 1000);
+                  }
+                : null,
+          ),
+        ),
+        SizedBox(
+          width: 44,
+          child: Text(_formatMs(length), textAlign: TextAlign.right),
         ),
       ],
     );
@@ -379,35 +444,98 @@ class _MultimediaPageState extends State<MultimediaPage>
   }
 
   // -------------------------------------------------------------------
-  // Peranti tab
+  // Peranti tab: the desktop's audio outputs (system volume)
   // -------------------------------------------------------------------
 
-  Widget _devicesTab(List<String> players, String? selected) {
-    if (players.isEmpty) {
+  Widget _devicesTab(List<SinkState> sinks) {
+    if (sinks.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(24),
           child: Text(
-            'Tidak ada pemutar yang ditemukan',
+            'Tidak ada perangkat audio yang ditemukan',
             textAlign: TextAlign.center,
           ),
         ),
       );
     }
     return ListView(
-      children: [
-        for (final name in players)
-          ListTile(
-            leading: const Icon(Icons.music_note),
-            title: Text(name),
-            selected: name == selected,
-            trailing: name == selected ? const Icon(Icons.check) : null,
-            onTap: () {
-              _appState.selectMprisPlayer(_entry.deviceId, name);
-              _tabs.animateTo(0);
-            },
-          ),
-      ],
+      padding: const EdgeInsets.only(top: 8, bottom: 16),
+      children: [for (final sink in sinks) _sinkCard(sink)],
+    );
+  }
+
+  Widget _sinkCard(SinkState sink) {
+    final scheme = Theme.of(context).colorScheme;
+    final percent =
+        _dragSinkVolumes[sink.name] ?? sink.volumePercent.toDouble();
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: sink.enabled
+                  ? null
+                  : () => _appState.selectSink(_entry.deviceId, sink),
+              child: Row(
+                children: [
+                  Icon(
+                    sink.enabled
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: sink.enabled ? scheme.primary : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      sink.label,
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Row(
+              children: [
+                IconButton(
+                  tooltip: sink.muted ? 'Bunyikan' : 'Bisukan',
+                  icon: Icon(sink.muted ? Icons.volume_off : Icons.volume_up),
+                  onPressed: () => _appState.setSinkMuted(
+                    _entry.deviceId,
+                    sink,
+                    !sink.muted,
+                  ),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: percent.clamp(0, 100),
+                    max: 100,
+                    divisions: 100,
+                    label: '${percent.round()}%',
+                    onChanged: (value) =>
+                        setState(() => _dragSinkVolumes[sink.name] = value),
+                    onChangeEnd: (value) {
+                      setState(() => _dragSinkVolumes.remove(sink.name));
+                      _appState.setSinkVolume(
+                        _entry.deviceId,
+                        sink,
+                        value.round(),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

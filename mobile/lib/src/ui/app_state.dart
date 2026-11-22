@@ -70,6 +70,7 @@ class AppState extends ChangeNotifier {
   Directory? _artDir;
   // M3: per-device multimedia state (deviceId -> ...).
   final Map<String, List<String>> _playerLists = {};
+  final Map<String, List<SinkState>> _sinks = {};
   final Map<String, Map<String, MprisPlayerState>> _playerStates = {};
   final Map<String, String> _selectedPlayers = {};
   final Map<String, String> _albumArtPaths = {};
@@ -333,6 +334,8 @@ class AppState extends ChangeNotifier {
           await _handleShareRequest(conn, packet);
         case 'kdeconnect.mpris':
           await _handleMpris(conn, packet);
+        case 'kdeconnect.systemvolume':
+          _handleSystemVolume(conn, packet);
         case 'kdeconnect.runcommand':
           _handleRunCommandList(conn, packet);
         case 'kdeconnect.runcommand.output':
@@ -648,6 +651,88 @@ class AppState extends ChangeNotifier {
       _logLine('Menolak pairing dari ${conn.remoteName}');
     } catch (e) {
       _logLine('Tolak pairing gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// The desktop's audio sinks as last reported, for the
+  /// multimedia page's Peranti tab.
+  List<SinkState> sinksFor(String deviceId) {
+    return List.unmodifiable(_sinks[deviceId] ?? const []);
+  }
+
+  /// A kdeconnect.systemvolume packet arrived: either the full
+  /// sink list or one sink's volume / mute update.
+  void _handleSystemVolume(DeviceConnection conn, Packet packet) {
+    final deviceId = conn.remoteDeviceId;
+    if (deviceId == null) return;
+    final list = SinkState.sinkListOf(packet);
+    if (list != null) {
+      _sinks[deviceId] = list;
+      return;
+    }
+    final name = packet.body['name'] as String?;
+    if (name == null) return;
+    final sinks = _sinks[deviceId];
+    if (sinks == null) return;
+    final index = sinks.indexWhere((sink) => sink.name == name);
+    if (index < 0) return;
+    final volume = (packet.body['volume'] as num?)?.toInt();
+    final muted = packet.body['muted'] as bool?;
+    if (volume == null && muted == null) return;
+    sinks[index] = sinks[index].copyWith(volume: volume, muted: muted);
+  }
+
+  /// Ask a device for its audio sink list (the Peranti tab).
+  Future<void> requestSinks(String deviceId) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.requestSinks();
+    } catch (e) {
+      _logLine('Gagal meminta daftar perangkat audio: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Set one sink's volume from a 0..100 percent (the daemon works
+  /// in raw PulseAudio units). Setting the volume unmutes.
+  Future<void> setSinkVolume(
+    String deviceId,
+    SinkState sink,
+    int percent,
+  ) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    final raw = (percent.clamp(0, 100) * sink.maxVolume / 100).round();
+    try {
+      await conn.sendSinkVolume(sink.name, raw);
+    } catch (e) {
+      _logLine('Atur volume perangkat gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Mute or unmute one sink.
+  Future<void> setSinkMuted(String deviceId, SinkState sink, bool muted) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendSinkMuted(sink.name, muted);
+    } catch (e) {
+      _logLine('Atur mute perangkat gagal: $e');
+    }
+    notifyListeners();
+  }
+
+  /// Make one sink the desktop's default output.
+  Future<void> selectSink(String deviceId, SinkState sink) async {
+    final conn = _connections[deviceId];
+    if (conn == null) return;
+    try {
+      await conn.sendSinkEnabled(sink.name);
+    } catch (e) {
+      _logLine('Pilih perangkat audio gagal: $e');
     }
     notifyListeners();
   }

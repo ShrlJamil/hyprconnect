@@ -136,10 +136,13 @@ void main() {
     expect(find.text('3:20'), findsOneWidget);
     // Seek bar and volume slider.
     expect(find.byType(Slider), findsNWidgets(2));
-    // The player name lives on the Peranti tab now.
+    // The player is picked from the dropdown under the artwork.
+    expect(find.text('mpv'), findsOneWidget);
+    // No sinks were fed, so Peranti states that honestly.
     await tester.tap(find.text('Peranti'));
     await tester.pumpAndSettle();
-    expect(find.text('mpv'), findsOneWidget);
+    expect(find.text('Tidak ada perangkat audio yang ditemukan'),
+        findsOneWidget);
     await tester.tap(find.text('Putar'));
     await tester.pumpAndSettle();
     // Pause is offered while playing; tapping it sends the action
@@ -147,6 +150,55 @@ void main() {
     await tester.tap(find.byTooltip('Jeda'));
     await tester.pumpAndSettle();
     expect(find.text('Lagu Tes'), findsOneWidget);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  testWidgets('sink list renders on Peranti and updates incrementally',
+      (tester) async {
+    final state = AppState.test(settings: PluginSettings.inMemory());
+    final conn = await _fakeConn(tester);
+    await tester.runAsync(
+      () => state.handleIncomingPacket(
+        conn,
+        Packet.now('kdeconnect.systemvolume', {
+          'sinkList': [
+            {
+              'name': 'alsa_output.pci.analog-stereo',
+              'description': 'Built-in Audio Analog Stereo',
+              'muted': false,
+              'volume': 32768,
+              'maxVolume': 65536,
+              'enabled': true,
+            },
+          ],
+        }),
+      ),
+    );
+    final sinks = state.sinksFor(_deviceId);
+    expect(sinks, hasLength(1));
+    expect(sinks.single.label, 'Built-in Audio Analog Stereo');
+    expect(sinks.single.volumePercent, 50);
+    expect(sinks.single.enabled, isTrue);
+
+    // An incremental volume update lands on the same sink.
+    await tester.runAsync(
+      () => state.handleIncomingPacket(
+        conn,
+        Packet.now('kdeconnect.systemvolume', {
+          'name': 'alsa_output.pci.analog-stereo',
+          'volume': 65536,
+        }),
+      ),
+    );
+    expect(state.sinksFor(_deviceId).single.volumePercent, 100);
+
+    state.registerTestConnection(conn);
+    await tester.pumpWidget(
+      MaterialApp(home: MultimediaPage(appState: state, entry: _entry())),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Peranti'));
+    await tester.pumpAndSettle();
+    expect(find.text('Built-in Audio Analog Stereo'), findsOneWidget);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   testWidgets('state updates replace the previous player state',

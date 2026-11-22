@@ -11,4 +11,5 @@ export 'runcommand.dart';
 export 'mousepad.dart';
 export 'payload.dart';
 export 'presenter.dart';
+export 'system_volume.dart';
 export 'trust_store.dart';

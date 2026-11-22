@@ -409,3 +409,20 @@ Previous/Stop/Next tonal row and the volume slider, all in the
 app's indigo scheme. The ±10 second buttons went away (the seek
 bar covers them). Verified live in the emulator against a real
 Brave player on the laptop.
+
+Addendum (2026-11-22 evening, Sahrul, correcting the tab build):
+"Peranti" is the desktop's audio outputs with their global
+volume (kdeconnect.systemvolume), NOT a player picker — the
+player picker is a dropdown on the Putar tab under the artwork.
+The app learned the systemvolume protocol (requestSinks, raw
+PulseAudio units, mute, set-default) and Peranti now renders one
+card per sink like the stock app. Putar also gained the seek
+buttons beside Previous/Stop/Next when the player can seek, and
+the seek bar moved below the transport row with both times
+flanking it. Debugging the first live test found a REAL bug in
+DeviceConnection.sendPacket: two sends racing on one socket make
+the loser's flush() throw "StreamSink is bound to a stream" and
+its packet silently never leaves the phone; sends are now
+serialized through a future chain. Proven live in the emulator:
+requestSinks reached the daemon and a slider drag moved the
+laptop's actual volume 16% -> 60% (restored to 16% afterwards).

@@ -28,6 +28,7 @@ import 'dart:typed_data';
 
 import 'identity.dart';
 import 'mpris.dart';
+import 'system_volume.dart';
 import 'mousepad.dart';
 import 'runcommand.dart';
 import 'packet.dart';
@@ -536,6 +537,26 @@ class DeviceConnection {
     await sendPacket(mprisSetPosition(player, microseconds));
   }
 
+  /// Ask for the desktop's audio sink list.
+  Future<void> requestSinks() async {
+    await sendPacket(systemVolumeRequestSinks());
+  }
+
+  /// Set one sink's volume, in raw PulseAudio units.
+  Future<void> sendSinkVolume(String name, int rawVolume) async {
+    await sendPacket(systemVolumeSetVolume(name, rawVolume));
+  }
+
+  /// Mute or unmute one sink.
+  Future<void> sendSinkMuted(String name, bool muted) async {
+    await sendPacket(systemVolumeSetMuted(name, muted));
+  }
+
+  /// Make one sink the default output.
+  Future<void> sendSinkEnabled(String name) async {
+    await sendPacket(systemVolumeSetEnabled(name));
+  }
+
   /// Pull the album art for a file:// url the daemon currently
   /// reports for this player. The answer is a kdeconnect.mpris
   /// packet flagged transferringAlbumArt with a payload; read it
@@ -704,13 +725,28 @@ class DeviceConnection {
     await sendPacket(Packet.ping(message));
   }
 
+  /// Sends are serialized through this chain: two sendPacket calls
+  /// racing on one socket make the loser's flush() throw "StreamSink
+  /// is bound to a stream" and its packet never leaves the phone
+  /// (found the hard way by the multimedia page, the first caller
+  /// to fire two requests back to back).
+  Future<void> _sendChain = Future.value();
+
   Future<void> sendPacket(Packet packet) async {
-    final socket = _socket;
-    if (socket == null) {
-      throw StateError('not connected');
+    final previous = _sendChain;
+    final turn = Completer<void>();
+    _sendChain = turn.future;
+    await previous;
+    try {
+      final socket = _socket;
+      if (socket == null) {
+        throw StateError('not connected');
+      }
+      socket.write(packet.toLine());
+      await socket.flush();
+    } finally {
+      turn.complete();
     }
-    socket.write(packet.toLine());
-    await socket.flush();
   }
 
   Future<void> close() async {

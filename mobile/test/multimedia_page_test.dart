@@ -60,6 +60,30 @@ void main() {
     expect(find.text('Tidak ada koneksi ke perangkat ini.'), findsOneWidget);
   });
 
+  testWidgets('connected with no players shows the empty state',
+      (tester) async {
+    final state = AppState.test(settings: PluginSettings.inMemory());
+    final conn = await _fakeConn(tester);
+    state.registerTestConnection(conn);
+    await tester.pumpWidget(
+      MaterialApp(home: MultimediaPage(appState: state, entry: _entry())),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Tidak ada pemutar yang ditemukan'), findsOneWidget);
+    expect(find.text('Putar'), findsWidgets);
+    expect(find.text('Peranti'), findsOneWidget);
+    // The control skeleton is present but disabled.
+    final play = tester.widget<FilledButton>(
+      find
+          .ancestor(
+            of: find.byIcon(Icons.play_arrow),
+            matching: find.byType(FilledButton),
+          )
+          .first,
+    );
+    expect(play.onPressed, isNull);
+  });
+
   testWidgets('player list and state render the now-playing card',
       (tester) async {
     final state = AppState.test(settings: PluginSettings.inMemory());
@@ -108,11 +132,16 @@ void main() {
     expect(find.text('Lagu Tes'), findsOneWidget);
     expect(find.text('Artis'), findsOneWidget);
     expect(find.text('Album'), findsOneWidget);
-    expect(find.text('Memutar'), findsOneWidget);
-    expect(find.text('mpv'), findsOneWidget);
     expect(find.text('0:30'), findsOneWidget);
     expect(find.text('3:20'), findsOneWidget);
-    expect(find.text('75%'), findsOneWidget);
+    // Seek bar and volume slider.
+    expect(find.byType(Slider), findsNWidgets(2));
+    // The player name lives on the Peranti tab now.
+    await tester.tap(find.text('Peranti'));
+    await tester.pumpAndSettle();
+    expect(find.text('mpv'), findsOneWidget);
+    await tester.tap(find.text('Putar'));
+    await tester.pumpAndSettle();
     // Pause is offered while playing; tapping it sends the action
     // (no live socket here, so it is logged and ignored, not a crash).
     await tester.tap(find.byTooltip('Jeda'));

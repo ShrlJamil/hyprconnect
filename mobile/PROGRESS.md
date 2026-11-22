@@ -397,3 +397,15 @@ HyprPresenter's layout but NOT its colours — the private dark green
 theme is gone and the page uses the app's own indigo scheme like
 every other page. The pointer card is primaryContainer (primary
 while held) with matching on-container content colours.
+
+Addendum (2026-11-22 evening, Sahrul): the multimedia page now
+follows the KDE Connect app's shape — AppBar with the device name
+as subtitle, Putar / Peranti tabs, and an empty state that shows
+the whole control skeleton disabled under a big music note with
+"Tidak ada pemutar yang ditemukan". The playing state merges the
+desktop reference he sent earlier: big rounded artwork, title and
+artist, seek bar with both times, a wide play/pause button, a
+Previous/Stop/Next tonal row and the volume slider, all in the
+app's indigo scheme. The ±10 second buttons went away (the seek
+bar covers them). Verified live in the emulator against a real
+Brave player on the laptop.

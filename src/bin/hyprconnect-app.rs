@@ -1159,17 +1159,27 @@ fn build_device_list(state: &Rc<AppState>, dev: &Value) -> GtkBox {
     {
         let id2 = id.clone();
         let mp = mountpoint.clone();
+        let state2 = state.clone();
         browse.connect_activated(move |_| {
             if mounted {
                 open_file_manager(&mp);
             } else {
                 send_command("mount", &id2);
                 let id3 = id2.clone();
+                let state3 = state2.clone();
                 gtk4::glib::spawn_future_local(async move {
                     let found =
                         gtk4::gio::spawn_blocking(move || wait_for_mountpoint(&id3)).await;
-                    if let Ok(Some(path)) = found {
-                        open_file_manager(&path);
+                    match found {
+                        Ok(Some(path)) => open_file_manager(&path),
+                        // A silent no-op here reads as a broken
+                        // app; say plainly that the device gave
+                        // no file access to mount.
+                        _ => show_info_dialog(
+                            &state3.window,
+                            "Could not browse this device",
+                            "The device did not provide file access, so nothing could be mounted. On the HyprConnect phone app, browsing needs the all-files access allowed in its plugin settings.",
+                        ),
                     }
                 });
             }

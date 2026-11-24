@@ -670,7 +670,13 @@ class AppState extends ChangeNotifier {
       );
       return;
     }
-    final server = await NativeBridge.startSftpServer();
+    // The native side is expected to always answer, but a lost
+    // reply must never hang this handler (and with it the send
+    // chain) forever.
+    final server = await NativeBridge.startSftpServer().timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => null,
+    );
     if (server == null) {
       _logLine('SFTP server failed to start for ${conn.remoteName}');
       return;

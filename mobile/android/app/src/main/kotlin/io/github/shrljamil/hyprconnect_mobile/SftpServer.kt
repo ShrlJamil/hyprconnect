@@ -7,6 +7,8 @@ import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider
 import org.apache.sshd.sftp.server.SftpSubsystemFactory
 import java.security.SecureRandom
 import java.security.Security
+import org.apache.sshd.common.util.io.PathUtils
+import java.nio.file.Paths
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 
 /// The embedded SFTP server behind the sftp plugin. When a
@@ -29,7 +31,26 @@ object SftpServer {
     data class Info(val port: Int, val user: String, val password: String)
 
     @Synchronized
-    fun start(): Info? {
+    fun start(homeDir: String): Info? =
+        try {
+            startInternal(homeDir)
+        } catch (t: Throwable) {
+            // Nothing in here may ever take the app process down:
+            // an uncaught Error on this thread kills the whole app.
+            android.util.Log.e("SftpServer", "start failed", t)
+            null
+        }
+
+    private fun startInternal(homeDir: String): Info? {
+        // Apache SSHD resolves a user home folder while its server
+        // classes initialize, and Android has no user.home: without
+        // this resolver the class initializer throws
+        // ExceptionInInitializerError (an Error, so catch (Exception)
+        // below could never contain it) and the process dies.
+        try {
+            PathUtils.setUserHomeFolderResolver { Paths.get(homeDir) }
+        } catch (_: Throwable) {
+        }
         stopLocked()
         ensureFullCryptoProvider()
         val candidate = randomPassword()
@@ -50,7 +71,7 @@ object SftpServer {
                 sshd.start()
                 server = sshd
                 return Info(port, USER, candidate)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 try {
                     sshd?.stop(true)
                 } catch (_: Exception) {

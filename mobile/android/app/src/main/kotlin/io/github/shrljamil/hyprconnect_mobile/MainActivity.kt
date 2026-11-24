@@ -123,7 +123,7 @@ class MainActivity : FlutterActivity() {
                         // Binding and key generation do not
                         // belong on the platform thread.
                         Thread {
-                            val info = SftpServer.start()
+                            val info = SftpServer.start(applicationContext.filesDir.absolutePath)
                             android.os.Handler(android.os.Looper.getMainLooper())
                                 .post {
                                     result.success(

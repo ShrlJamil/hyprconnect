@@ -56,6 +56,9 @@ class _PresenterPageState extends State<PresenterPage> {
 
   StreamSubscription<GyroscopeEvent>? _gyroSub;
 
+  /// Timestamp of the previous gyro reading, for interval scaling.
+  DateTime? _lastGyroAt;
+
   List<String> _notes = <String>[];
   int _slide = 1;
 
@@ -92,10 +95,24 @@ class _PresenterPageState extends State<PresenterPage> {
   }
 
   void _subscribeGyro() {
-    final stream = widget.gyroStream ?? gyroscopeEventStream();
+    // Game-rate sampling (20 ms), like the stock app and like
+    // HyprPresenter's fixed send timer: the sensors_plus default
+    // (200 ms) delivered five chunky readings per second, which
+    // no amount of desktop smoothing can turn into a smooth glide.
+    final stream =
+        widget.gyroStream ??
+        gyroscopeEventStream(samplingPeriod: const Duration(milliseconds: 20));
     _gyroSub = stream.listen(
       (event) {
-        final delta = gyroToPresenterDelta(event.x, event.z);
+        final at = event.timestamp;
+        final dt = _lastGyroAt == null
+            ? presenterReferenceIntervalSeconds
+            : at.difference(_lastGyroAt!).inMicroseconds / 1e6;
+        _lastGyroAt = at;
+        final delta = scalePresenterDelta(
+          gyroToPresenterDelta(event.x, event.z),
+          dt,
+        );
         if (delta.dx.abs() < _gyroDeadZone && delta.dy.abs() < _gyroDeadZone) {
           return;
         }
@@ -195,6 +212,13 @@ class _PresenterPageState extends State<PresenterPage> {
           icon: const Icon(Icons.arrow_back),
           tooltip: context.l10n.back,
           onPressed: _close,
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(context.l10n.pluginPresenterTile),
+            Text(_entry.name, style: Theme.of(context).textTheme.bodySmall),
+          ],
         ),
         actions: [
           IconButton(
@@ -448,6 +472,7 @@ class _PresenterPageState extends State<PresenterPage> {
                     behavior: HitTestBehavior.opaque,
                     onPointerDown: (event) {
                       setState(() => _holding = true);
+                      _lastGyroAt = null;
                       _lastPadPos = event.position;
                     },
                     onPointerMove: (event) {
@@ -476,6 +501,7 @@ class _PresenterPageState extends State<PresenterPage> {
   }
 
   void _release() {
+    _lastGyroAt = null;
     _lastPadPos = null;
     if (_holding) {
       setState(() => _holding = false);

@@ -76,6 +76,30 @@ void main() {
     });
   });
 
+  group('delta scaling by sensor interval', () {
+    test('a game-rate interval leaves the delta unchanged', () {
+      final d = scalePresenterDelta(gyroToPresenterDelta(0.5, -1.0), 0.02);
+      expect(d.dx, closeTo(0.036, 1e-9));
+      expect(d.dy, closeTo(-0.018, 1e-9));
+    });
+
+    test('a slower sensor scales the delta up proportionally', () {
+      final d = scalePresenterDelta((dx: 0.01, dy: -0.02), 0.06);
+      expect(d.dx, closeTo(0.03, 1e-9));
+      expect(d.dy, closeTo(-0.06, 1e-9));
+    });
+
+    test('a long stall is clamped so the dot cannot leap', () {
+      final d = scalePresenterDelta((dx: 0.01, dy: 0.0), 5.0);
+      expect(d.dx, closeTo(0.05, 1e-9));
+    });
+
+    test('a non-positive interval produces no motion', () {
+      expect(scalePresenterDelta((dx: 0.01, dy: 0.01), 0).dx, 0);
+      expect(scalePresenterDelta((dx: 0.01, dy: 0.01), -1).dy, 0);
+    });
+  });
+
   group('monitor list replies', () {
     test('parses monitors and the pinned monitor', () {
       final list = PresenterMonitorList.fromPacket(

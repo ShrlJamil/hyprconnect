@@ -54,6 +54,28 @@ const double presenterGyroSensitivity = 0.036;
   return (dx: -gyroZ * sensitivity, dy: -gyroX * sensitivity);
 }
 
+/// The sensor interval the stock sensitivity formula assumes:
+/// the stock app listens at Android's game rate, one reading per
+/// 20 ms, and folds each reading straight into a packet.
+const double presenterReferenceIntervalSeconds = 0.02;
+
+/// Scale one reading's delta by the interval the reading actually
+/// covers, relative to the reference interval. Without this the
+/// pointer speed (and chunkiness) depends on how fast the sensor
+/// delivers: at the 200 ms default interval the stock formula
+/// moves the dot in five huge steps per second and crawls. The
+/// interval is clamped to 100 ms so a stall (or a fresh hold)
+/// cannot make the dot leap.
+({double dx, double dy}) scalePresenterDelta(
+  ({double dx, double dy}) delta,
+  double dtSeconds,
+) {
+  if (!dtSeconds.isFinite || dtSeconds <= 0) return (dx: 0, dy: 0);
+  final clamped = dtSeconds > 0.1 ? 0.1 : dtSeconds;
+  final k = clamped / presenterReferenceIntervalSeconds;
+  return (dx: delta.dx * k, dy: delta.dy * k);
+}
+
 /// Move the presenter dot by a relative delta (fractions of the
 /// session monitor). The first delta starts the session.
 Packet presenterMove(double dx, double dy) {

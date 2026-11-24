@@ -5,6 +5,7 @@
 
 use adw::prelude::*;
 use gtk4::prelude::*;
+use hyprconnect::update::{self, ReleaseInfo};
 use gtk4::{Box as GtkBox, Button, Image, Label, ListBox, ListBoxRow, Orientation, ScrolledWindow, Separator};
 use serde_json::{json, Value};
 use std::cell::RefCell;
@@ -148,6 +149,21 @@ fn build_ui(app: &adw::Application) {
     let sidebar_title = Label::new(Some("Devices"));
     sidebar_title.add_css_class("title-4");
     sidebar_header.set_title_widget(Some(&sidebar_title));
+    // App menu at the end of the sidebar header: the manual
+    // update check (the automatic one runs at startup, below).
+    let app_menu = gtk4::gio::Menu::new();
+    app_menu.append(Some("Check for Updates"), Some("app.check-updates"));
+    let menu_button = gtk4::MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .menu_model(&app_menu)
+        .build();
+    sidebar_header.pack_end(&menu_button);
+    let check_action = gtk4::gio::SimpleAction::new("check-updates", None);
+    {
+        let win = window.clone();
+        check_action.connect_activate(move |_, _| check_updates(&win, true));
+    }
+    app.add_action(&check_action);
     let sidebar_scroll = ScrolledWindow::new();
     sidebar_scroll.set_vexpand(true);
     let sidebar = ListBox::new();
@@ -208,6 +224,7 @@ fn build_ui(app: &adw::Application) {
     }
     window.set_content(Some(&split));
     window.present();
+    check_updates(&window, false);
 
     let state = Rc::new(AppState {
         window,
@@ -2272,4 +2289,133 @@ mod plock {
 
     wayland_client::delegate_noop!(LockState: ignore ZwpPointerConstraintsV1);
     wayland_client::delegate_noop!(LockState: ignore ZwpRelativePointerManagerV1);
+}
+
+enum CheckOutcome {
+    UpToDate,
+    Available(ReleaseInfo),
+    Failed(String),
+}
+
+/// Check GitHub Releases for a newer HyprConnect on a blocking
+/// thread. A manual check always reports its outcome; the
+/// automatic startup check only speaks up when an update exists.
+fn check_updates(window: &adw::ApplicationWindow, manual: bool) {
+    let win = window.clone();
+    gtk4::glib::spawn_future_local(async move {
+        let fetched = gtk4::gio::spawn_blocking(|| match update::fetch_latest() {
+            Ok(latest) => {
+                if update::is_newer(&latest.tag, &update::current_tag()) {
+                    CheckOutcome::Available(latest)
+                } else {
+                    CheckOutcome::UpToDate
+                }
+            }
+            Err(e) => CheckOutcome::Failed(format!("{e:#}")),
+        })
+        .await;
+        let Ok(outcome) = fetched else {
+            return;
+        };
+        match outcome {
+            CheckOutcome::Available(info) => show_update_dialog(&win, &info),
+            CheckOutcome::UpToDate if manual => show_info_dialog(
+                &win,
+                "No update available",
+                &format!(
+                    "HyprConnect {} is the latest version.",
+                    update::current_tag()
+                ),
+            ),
+            CheckOutcome::Failed(message) if manual => {
+                show_info_dialog(&win, "Update check failed", &message)
+            }
+            _ => {}
+        }
+    });
+}
+
+fn show_info_dialog(window: &adw::ApplicationWindow, heading: &str, body: &str) {
+    let dialog = adw::AlertDialog::new(Some(heading), Some(body));
+    dialog.add_response("ok", "OK");
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(window));
+}
+
+fn show_update_dialog(window: &adw::ApplicationWindow, info: &ReleaseInfo) {
+    let mut body = format!(
+        "HyprConnect {} is available. You have {}.",
+        info.tag,
+        update::current_tag()
+    );
+    let notes = info.notes.trim();
+    if !notes.is_empty() {
+        let short: String = notes.chars().take(600).collect();
+        body.push_str("\n\n");
+        body.push_str(&short);
+    }
+    let dialog = adw::AlertDialog::new(Some("Update available"), Some(&body));
+    dialog.add_response("later", "Later");
+    dialog.add_response("update", "Update Now");
+    dialog.set_response_appearance("update", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("update"));
+    dialog.set_close_response("later");
+    let win = window.clone();
+    let info = info.clone();
+    dialog.connect_response(None, move |_, response| {
+        if response == "update" {
+            run_update_install(&win, &info);
+        }
+    });
+    dialog.present(Some(window));
+}
+
+/// Download and install the release (both desktop binaries),
+/// restart the daemon, and offer to restart the app onto its
+/// new binary.
+fn run_update_install(window: &adw::ApplicationWindow, info: &ReleaseInfo) {
+    let win = window.clone();
+    let info = info.clone();
+    gtk4::glib::spawn_future_local(async move {
+        let fetched = gtk4::gio::spawn_blocking(move || -> Result<(), String> {
+            if !info.has_desktop_assets() {
+                return Err("The release carries no desktop binaries.".to_string());
+            }
+            update::install_release(&info).map_err(|e| format!("{e:#}"))?;
+            update::restart_daemon().map_err(|e| format!("{e:#}"))?;
+            Ok(())
+        })
+        .await;
+        match fetched {
+            Ok(Ok(())) => {
+                let dialog = adw::AlertDialog::new(
+                    Some("Update installed"),
+                    Some(
+                        "The daemon has been restarted. Restart HyprConnect \
+                         to use the new version.",
+                    ),
+                );
+                dialog.add_response("later", "Later");
+                dialog.add_response("restart", "Restart Now");
+                dialog.set_response_appearance(
+                    "restart",
+                    adw::ResponseAppearance::Suggested,
+                );
+                dialog.set_default_response(Some("restart"));
+                dialog.set_close_response("later");
+                dialog.connect_response(None, move |_, response| {
+                    if response == "restart" {
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = std::process::Command::new(exe).spawn();
+                        }
+                        std::process::exit(0);
+                    }
+                });
+                dialog.present(Some(&win));
+            }
+            Ok(Err(message)) => show_info_dialog(&win, "Update failed", &message),
+            Err(_) => show_info_dialog(&win, "Update failed", "The update task failed."),
+        }
+    });
 }

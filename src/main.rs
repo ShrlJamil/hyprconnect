@@ -12,6 +12,7 @@ use hyprconnect::pointer;
 use hyprconnect::identity::{self, LocalIdentity};
 use hyprconnect::packet::{plugin_for_packet, Packet, PLUGIN_NAMES};
 use hyprconnect::store::{hex_encode, TrustStore, TrustedDevice};
+use hyprconnect::update;
 use hyprconnect::{tls, identity::state_dir};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -3436,6 +3437,33 @@ async fn cli_monitor() -> Result<()> {
     Ok(())
 }
 
+/// `hyprconnect update [--check]`: self-update from GitHub
+/// Releases. Installs both desktop binaries (daemon and app)
+/// and restarts the daemon service.
+async fn update_command(check_only: bool) -> Result<()> {
+    let current = update::current_tag();
+    let latest = tokio::task::spawn_blocking(update::fetch_latest)
+        .await
+        .context("update check task failed")??;
+    if !update::is_newer(&latest.tag, &current) {
+        println!("HyprConnect {current} is up to date.");
+        return Ok(());
+    }
+    println!("Update available: {} (installed: {current})", latest.tag);
+    if check_only {
+        return Ok(());
+    }
+    if !latest.has_desktop_assets() {
+        anyhow::bail!("the release carries no desktop binaries");
+    }
+    tokio::task::spawn_blocking(move || update::install_release(&latest))
+        .await
+        .context("update install task failed")??;
+    update::restart_daemon()?;
+    println!("Updated. The daemon was restarted.");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -3462,9 +3490,14 @@ async fn main() -> Result<()> {
             let path = args.get(2).context("file path required")?;
             cli_command(json!({"cmd": "send_file", "deviceId": device, "path": path})).await
         }
+        "version" => {
+            println!("{}", update::current_tag());
+            Ok(())
+        }
+        "update" => update_command(args.iter().any(|a| a == "--check")).await,
         other => {
             eprintln!("unknown command: {}", other);
-            eprintln!("usage: hyprconnect [run|devices|monitor|pair|accept|reject|unpair|mount|unmount|ping|send] [deviceId] [path]");
+            eprintln!("usage: hyprconnect [run|devices|monitor|pair|accept|reject|unpair|mount|unmount|ping|send|version|update] [deviceId] [path]");
             std::process::exit(2);
         }
     }

@@ -5,4 +5,5 @@ pub mod identity;
 pub mod packet;
 pub mod store;
 pub mod tls;
+pub mod update;
 pub mod wayland;

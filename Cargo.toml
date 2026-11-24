@@ -1,6 +1,6 @@
 [package]
 name = "hyprconnect"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 description = "Compact KDE Connect-compatible daemon and GTK 4 app for Hyprland"
 license = "GPL-3.0-or-later"
@@ -29,6 +29,7 @@ sha2 = "0.10"
 x509-parser = "0.16"
 socket2 = "0.5"
 anyhow = "1"
+ureq = { version = "2", features = ["tls"] }
 gtk4 = { version = "0.10", optional = true, features = ["v4_10"] }
 adw = { package = "libadwaita", version = "0.8", optional = true, features = ["v1_5"] }
 wayland-client = "0.31"

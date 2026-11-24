@@ -116,7 +116,28 @@ class AppDrawer extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.add_circle_outline),
               title: Text(context.l10n.pairNewDevice),
-              onTap: () => _push(context, PairNewPage(appState: appState)),
+              onTap: () {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                navigator.push(
+                  MaterialPageRoute<void>(
+                    builder: (pageContext) => PairNewPage(
+                      appState: appState,
+                      // The pair page keeps the drawer: picking a
+                      // device there leaves the page and selects the
+                      // device on the home page underneath.
+                      drawer: AppDrawer(
+                        appState: appState,
+                        selectedDeviceId: selectedDeviceId,
+                        onSelectDevice: (id) {
+                          Navigator.of(pageContext).pop();
+                          onSelectDevice(id);
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
             const Divider(),
             ListTile(

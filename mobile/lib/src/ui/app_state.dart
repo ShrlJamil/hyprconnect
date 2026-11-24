@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../platform/native_bridge.dart';
 import '../protocol/protocol.dart';
+import '../settings/app_prefs.dart';
 import '../settings/plugin_settings.dart';
 import '../settings/remote_input_prefs.dart';
 
@@ -60,6 +61,8 @@ class AppState extends ChangeNotifier {
   TrustStore? _trust;
   PluginSettings? _pluginSettings;
   RemoteInputPrefsStore? _remoteInputPrefs;
+  AppPrefs? _prefs;
+  Directory? _appDir;
   TcpListener? _listener;
   Discovery? _discovery;
   final Map<String, DiscoveredDevice> _found = {};
@@ -110,6 +113,12 @@ class AppState extends ChangeNotifier {
 
   RemoteInputPrefsStore get remoteInputPrefsStore =>
       _remoteInputPrefs ?? RemoteInputPrefsStore.inMemory();
+
+  /// App-wide preferences (theme, devices added by IP, setup
+  /// gate). An in-memory default until one is injected, so pages
+  /// and tests never see a null.
+  AppPrefs get prefs => _prefs ?? _fallbackPrefs;
+  final AppPrefs _fallbackPrefs = AppPrefs.inMemory();
 
   /// The remote input (mousepad) preferences for one device.
   RemoteInputPrefs remoteInputPrefsFor(String deviceId) =>
@@ -259,13 +268,16 @@ class AppState extends ChangeNotifier {
     _remoteInputPrefs = remoteInputPrefs;
   }
 
-  AppState();
+  AppState({AppPrefs? prefs}) {
+    _prefs = prefs;
+  }
 
   Future<void> initialize() async {
     if (_started) return;
     _started = true;
     try {
       final appDir = await getApplicationDocumentsDirectory();
+      _appDir = appDir;
       final identity = await LocalIdentity.loadOrCreate(
         appDir,
         deviceName: 'HyprConnect',
@@ -298,6 +310,16 @@ class AppState extends ChangeNotifier {
       _remoteInputPrefs = remoteInputPrefs;
       _listener = listener;
       _discovery = discovery;
+      if (!prefs.setupComplete && trust.devices.isNotEmpty) {
+        // An install that already has paired devices is not a
+        // fresh install: the first-run setup gate does not
+        // apply to it.
+        await prefs.markSetupComplete();
+      }
+      for (final ip in prefs.manualAddresses) {
+        final address = InternetAddress.tryParse(ip);
+        if (address != null) unawaited(discovery.probeAddress(address));
+      }
       _status = 'Listening on port $port';
       _logLine('Identity: ${identity.deviceId}');
       notifyListeners();
@@ -569,6 +591,22 @@ class AppState extends ChangeNotifier {
         conn.remoteDeviceId ?? '',
       );
       _registerConnection(conn);
+      final remoteId = conn.remoteDeviceId;
+      if (remoteId != null && !_found.containsKey(remoteId)) {
+        // First contact that did not come through a discovery
+        // broadcast (for example a desktop added by IP that
+        // connected back): give it a list entry so it can be
+        // paired and opened like any discovered device. The
+        // tcpPort is the protocol's first port; a broadcast
+        // heard later corrects it.
+        _found[remoteId] = DiscoveredDevice(
+          deviceId: remoteId,
+          name: conn.remoteName ?? '',
+          deviceType: '',
+          address: raw.remoteAddress,
+          tcpPort: 1714,
+        );
+      }
       _logLine(
         'Connected (incoming) from ${conn.remoteName} (${conn.remoteDeviceId})',
       );
@@ -634,6 +672,13 @@ class AppState extends ChangeNotifier {
       }
     }());
     _discovery?.broadcastIdentity();
+    final discovery = _discovery;
+    if (discovery != null) {
+      for (final ip in prefs.manualAddresses) {
+        final address = InternetAddress.tryParse(ip);
+        if (address != null) unawaited(discovery.probeAddress(address));
+      }
+    }
     for (final device in _found.values) {
       _maybeAutoConnect(device);
     }
@@ -733,6 +778,101 @@ class AppState extends ChangeNotifier {
       notifyListeners();
       return ConnectOutcome.failed;
     }
+  }
+
+  /// Rename this device. The new name is stored in device.json
+  /// (the identity's own file), swapped into the live identity,
+  /// and announced at once; channels that are already open keep
+  /// the name they were opened with until they reconnect.
+  Future<void> setDeviceName(String name) async {
+    final identity = _identity;
+    final dir = _appDir;
+    final trimmed = name.trim();
+    if (identity == null || dir == null || trimmed.isEmpty) return;
+    if (trimmed == identity.deviceName) return;
+    await File('${dir.path}/device.json').writeAsString(
+      jsonEncode({'deviceId': identity.deviceId, 'deviceName': trimmed}),
+    );
+    final updated = LocalIdentity(
+      deviceId: identity.deviceId,
+      deviceName: trimmed,
+      certPem: identity.certPem,
+      keyPem: identity.keyPem,
+      certDer: identity.certDer,
+      spkiDer: identity.spkiDer,
+    );
+    _identity = updated;
+    final discovery = _discovery;
+    if (discovery != null) {
+      discovery.identity = updated;
+      discovery.broadcastIdentity();
+    }
+    _logLine('Device name changed to $trimmed');
+    notifyListeners();
+  }
+
+  /// Store an address added by hand and announce ourselves to
+  /// it right away.
+  Future<void> addManualAddress(String address) async {
+    await prefs.addManualAddress(address);
+    probeManualAddress(address);
+    notifyListeners();
+  }
+
+  Future<void> removeManualAddress(String address) async {
+    await prefs.removeManualAddress(address);
+    notifyListeners();
+  }
+
+  /// Announce ourselves directly to one stored address.
+  void probeManualAddress(String address) {
+    final discovery = _discovery;
+    final parsed = InternetAddress.tryParse(address);
+    if (discovery == null || parsed == null) return;
+    unawaited(discovery.probeAddress(parsed));
+  }
+
+  /// True while this is a fresh install (no paired devices yet)
+  /// whose first-run setup gate has not been completed.
+  bool get setupGateRequired {
+    if (prefs.setupComplete) return false;
+    final trust = _trust;
+    if (trust == null) return false;
+    return trust.devices.isEmpty;
+  }
+
+  /// Mark the first-run setup gate as passed.
+  Future<void> completeSetup() async {
+    await prefs.markSetupComplete();
+    notifyListeners();
+  }
+
+  /// Write the session log to a file in the received files
+  /// folder, where it can be found with a file manager. Returns
+  /// the file's path, or null when the folder is not known yet.
+  Future<String?> exportLog() async {
+    final dir = _receiveDir;
+    if (dir == null) return null;
+    final now = DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    final stamp =
+        '${now.year}${two(now.month)}${two(now.day)}'
+        '-${two(now.hour)}${two(now.minute)}${two(now.second)}';
+    final file = File('${dir.path}/hyprconnect-log-$stamp.txt');
+    final buffer = StringBuffer()
+      ..writeln('HyprConnect session log, exported $now')
+      ..writeln(
+        'Identity: ${_identity?.deviceId ?? '-'} '
+        '(${_identity?.deviceName ?? '-'})',
+      )
+      ..writeln('Status: $_status')
+      ..writeln();
+    for (final line in _log) {
+      buffer.writeln(line);
+    }
+    await file.writeAsString(buffer.toString());
+    _logLine('Log exported to ${file.path}');
+    return file.path;
   }
 
   Future<void> requestPair(String deviceId) async {

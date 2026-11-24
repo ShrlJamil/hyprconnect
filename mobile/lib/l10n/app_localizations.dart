@@ -1069,6 +1069,180 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Open'**
   String get autostartOpen;
+
+  /// No description provided for @save.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get save;
+
+  /// No description provided for @add.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get add;
+
+  /// No description provided for @delete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get delete;
+
+  /// No description provided for @deviceName.
+  ///
+  /// In en, this message translates to:
+  /// **'Device name'**
+  String get deviceName;
+
+  /// No description provided for @chooseTheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose theme'**
+  String get chooseTheme;
+
+  /// No description provided for @themeSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'System default'**
+  String get themeSystem;
+
+  /// No description provided for @themeLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get themeLight;
+
+  /// No description provided for @themeDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get themeDark;
+
+  /// No description provided for @persistentNotification.
+  ///
+  /// In en, this message translates to:
+  /// **'Persistent notification'**
+  String get persistentNotification;
+
+  /// No description provided for @persistentNotificationBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to turn the persistent notification on or off in the system notification settings.'**
+  String get persistentNotificationBody;
+
+  /// No description provided for @addDeviceByIp.
+  ///
+  /// In en, this message translates to:
+  /// **'Add device by IP'**
+  String get addDeviceByIp;
+
+  /// No description provided for @manualDevicesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} devices added manually'**
+  String manualDevicesCount(int count);
+
+  /// No description provided for @noManualDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'No devices added manually'**
+  String get noManualDevices;
+
+  /// No description provided for @noManualDevicesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a desktop by its IP address when discovery cannot find it, for example on a network that blocks broadcasts.'**
+  String get noManualDevicesBody;
+
+  /// No description provided for @manualDeviceTapHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to announce to this address'**
+  String get manualDeviceTapHint;
+
+  /// No description provided for @manualDeviceProbing.
+  ///
+  /// In en, this message translates to:
+  /// **'Announcing to {ip}. A device that answers appears under Pair new device.'**
+  String manualDeviceProbing(String ip);
+
+  /// No description provided for @ipAddress.
+  ///
+  /// In en, this message translates to:
+  /// **'IP address'**
+  String get ipAddress;
+
+  /// No description provided for @ipAddressHint.
+  ///
+  /// In en, this message translates to:
+  /// **'192.168.1.10'**
+  String get ipAddressHint;
+
+  /// No description provided for @invalidIp.
+  ///
+  /// In en, this message translates to:
+  /// **'That does not look like a valid IP address.'**
+  String get invalidIp;
+
+  /// No description provided for @exportLogs.
+  ///
+  /// In en, this message translates to:
+  /// **'Export app logs'**
+  String get exportLogs;
+
+  /// No description provided for @exportLogsBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Save the session log to a file in the received files folder, where it can help troubleshoot issues.'**
+  String get exportLogsBody;
+
+  /// No description provided for @exportLogsSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Log saved to {path}'**
+  String exportLogsSaved(String path);
+
+  /// No description provided for @exportLogsFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The log could not be saved yet.'**
+  String get exportLogsFailed;
+
+  /// No description provided for @moreSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'More settings'**
+  String get moreSettings;
+
+  /// No description provided for @moreSettingsBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Each device\'s own settings can be found under Plugin settings on that device\'s page.'**
+  String get moreSettingsBody;
+
+  /// No description provided for @setupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Before you start'**
+  String get setupTitle;
+
+  /// No description provided for @setupIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Two system switches keep HyprConnect connected in the background. Both have to be on before you can continue.'**
+  String get setupIntro;
+
+  /// No description provided for @autostartConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'I have turned Autostart on for this app'**
+  String get autostartConfirm;
+
+  /// No description provided for @setupContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get setupContinue;
 }
 
 class _AppLocalizationsDelegate

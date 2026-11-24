@@ -1,40 +1,66 @@
 //! HyprConnect mobile. The root is a KDE Connect style shell: a
 //! navigation drawer (see app_drawer.dart) switches between paired
 //! devices, each shown as a device page; pairing a new device,
-//! settings and about live behind the drawer too.
+//! settings and about live behind the drawer too. On a fresh
+//! install a setup gate (see setup_gate_page.dart) comes first:
+//! the app cannot be used until the background-survival switches
+//! are on.
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'l10n/app_localizations.dart';
 import 'l10n/l10n.dart';
+import 'src/settings/app_prefs.dart';
 import 'src/ui/app_drawer.dart';
 import 'src/ui/app_state.dart';
 import 'src/ui/device_page.dart';
+import 'src/ui/setup_gate_page.dart';
 
-void main() {
-  runApp(const HyprConnectApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final appDir = await getApplicationDocumentsDirectory();
+  final prefs = await AppPrefs.load(appDir);
+  runApp(HyprConnectApp(prefs: prefs));
 }
 
 class HyprConnectApp extends StatelessWidget {
-  const HyprConnectApp({super.key});
+  final AppPrefs prefs;
+
+  const HyprConnectApp({super.key, required this.prefs});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'HyprConnect',
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
-      home: const HomePage(),
+    return AnimatedBuilder(
+      animation: prefs,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'HyprConnect',
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.indigo,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          themeMode: prefs.themeMode,
+          home: HomePage(prefs: prefs),
+        );
+      },
     );
   }
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final AppPrefs prefs;
+
+  const HomePage({super.key, required this.prefs});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -48,7 +74,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _appState = AppState();
+    _appState = AppState(prefs: widget.prefs);
     _appState.initialize();
   }
 
@@ -76,6 +102,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: _appState,
       builder: (context, _) {
+        if (_appState.setupGateRequired) {
+          return SetupGatePage(appState: _appState);
+        }
         final paired = _appState.entries
             .where(_isPaired)
             .where(

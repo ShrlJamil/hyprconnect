@@ -532,4 +532,103 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get autostartOpen => 'Buka';
+
+  @override
+  String get save => 'Simpan';
+
+  @override
+  String get add => 'Tambah';
+
+  @override
+  String get delete => 'Hapus';
+
+  @override
+  String get deviceName => 'Nama perangkat';
+
+  @override
+  String get chooseTheme => 'Pilih tema';
+
+  @override
+  String get themeSystem => 'Sistem Default';
+
+  @override
+  String get themeLight => 'Terang';
+
+  @override
+  String get themeDark => 'Gelap';
+
+  @override
+  String get persistentNotification => 'Notifikasi kukuh';
+
+  @override
+  String get persistentNotificationBody =>
+      'Ketuk untuk mengatur notifikasi kukuh di pengaturan notifikasi sistem.';
+
+  @override
+  String get addDeviceByIp => 'Tambahkan peranti dengan IP';
+
+  @override
+  String manualDevicesCount(int count) {
+    return '$count peranti ditambahkan manual';
+  }
+
+  @override
+  String get noManualDevices => 'Belum ada peranti yang ditambahkan manual';
+
+  @override
+  String get noManualDevicesBody =>
+      'Tambahkan desktop lewat alamat IP-nya kalau discovery tidak menemukannya, misalnya di jaringan yang memblokir broadcast.';
+
+  @override
+  String get manualDeviceTapHint => 'Ketuk untuk mengumumkan ke alamat ini';
+
+  @override
+  String manualDeviceProbing(String ip) {
+    return 'Mengumumkan ke $ip. Peranti yang menjawab akan muncul di Pair perangkat baru.';
+  }
+
+  @override
+  String get ipAddress => 'Alamat IP';
+
+  @override
+  String get ipAddressHint => '192.168.1.10';
+
+  @override
+  String get invalidIp => 'Alamat IP itu sepertinya tidak valid.';
+
+  @override
+  String get exportLogs => 'Ekspor log aplikasi';
+
+  @override
+  String get exportLogsBody =>
+      'Simpan log sesi ke sebuah berkas di folder file diterima, bisa membantu memecahkan masalah.';
+
+  @override
+  String exportLogsSaved(String path) {
+    return 'Log tersimpan di $path';
+  }
+
+  @override
+  String get exportLogsFailed => 'Log belum bisa disimpan.';
+
+  @override
+  String get moreSettings => 'Pengaturan selebihnya';
+
+  @override
+  String get moreSettingsBody =>
+      'Pengaturan tiap peranti bisa ditemukan di Pengaturan plugin pada halaman peranti itu.';
+
+  @override
+  String get setupTitle => 'Sebelum mulai';
+
+  @override
+  String get setupIntro =>
+      'Dua sakelar sistem menjaga HyprConnect tetap tersambung di latar belakang. Keduanya harus menyala sebelum kamu bisa lanjut.';
+
+  @override
+  String get autostartConfirm =>
+      'Saya sudah menyalakan Autostart untuk aplikasi ini';
+
+  @override
+  String get setupContinue => 'Lanjut';
 }

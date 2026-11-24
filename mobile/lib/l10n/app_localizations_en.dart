@@ -537,4 +537,102 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get autostartOpen => 'Open';
+
+  @override
+  String get save => 'Save';
+
+  @override
+  String get add => 'Add';
+
+  @override
+  String get delete => 'Delete';
+
+  @override
+  String get deviceName => 'Device name';
+
+  @override
+  String get chooseTheme => 'Choose theme';
+
+  @override
+  String get themeSystem => 'System default';
+
+  @override
+  String get themeLight => 'Light';
+
+  @override
+  String get themeDark => 'Dark';
+
+  @override
+  String get persistentNotification => 'Persistent notification';
+
+  @override
+  String get persistentNotificationBody =>
+      'Tap to turn the persistent notification on or off in the system notification settings.';
+
+  @override
+  String get addDeviceByIp => 'Add device by IP';
+
+  @override
+  String manualDevicesCount(int count) {
+    return '$count devices added manually';
+  }
+
+  @override
+  String get noManualDevices => 'No devices added manually';
+
+  @override
+  String get noManualDevicesBody =>
+      'Add a desktop by its IP address when discovery cannot find it, for example on a network that blocks broadcasts.';
+
+  @override
+  String get manualDeviceTapHint => 'Tap to announce to this address';
+
+  @override
+  String manualDeviceProbing(String ip) {
+    return 'Announcing to $ip. A device that answers appears under Pair new device.';
+  }
+
+  @override
+  String get ipAddress => 'IP address';
+
+  @override
+  String get ipAddressHint => '192.168.1.10';
+
+  @override
+  String get invalidIp => 'That does not look like a valid IP address.';
+
+  @override
+  String get exportLogs => 'Export app logs';
+
+  @override
+  String get exportLogsBody =>
+      'Save the session log to a file in the received files folder, where it can help troubleshoot issues.';
+
+  @override
+  String exportLogsSaved(String path) {
+    return 'Log saved to $path';
+  }
+
+  @override
+  String get exportLogsFailed => 'The log could not be saved yet.';
+
+  @override
+  String get moreSettings => 'More settings';
+
+  @override
+  String get moreSettingsBody =>
+      'Each device\'s own settings can be found under Plugin settings on that device\'s page.';
+
+  @override
+  String get setupTitle => 'Before you start';
+
+  @override
+  String get setupIntro =>
+      'Two system switches keep HyprConnect connected in the background. Both have to be on before you can continue.';
+
+  @override
+  String get autostartConfirm => 'I have turned Autostart on for this app';
+
+  @override
+  String get setupContinue => 'Continue';
 }

@@ -1,6 +1,7 @@
 //! Navigation drawer, mirroring KDE Connect Android: a header with
-//! this device, the paired devices under "Peranti", a highlighted
-//! pair-new-device action, then settings and about.
+//! this device, the paired devices under "Peranti" with the pill
+//! highlight on the selected device, then pair-new-device, settings
+//! and about.
 
 import 'package:flutter/material.dart';
 
@@ -85,33 +86,37 @@ class AppDrawer extends StatelessWidget {
               ),
             ),
             for (final entry in pairedDevices)
-              ListTile(
-                leading: Icon(
-                  entry.deviceType.contains('phone')
-                      ? Icons.smartphone
-                      : Icons.desktop_windows,
-                ),
-                title: Text(entry.name.isEmpty ? entry.deviceId : entry.name),
-                selected: entry.deviceId == selectedDeviceId,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onSelectDevice(entry.deviceId);
-                },
-              ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-              child: Material(
-                color: colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(24),
-                child: ListTile(
-                  leading: const Icon(Icons.add_circle_outline),
-                  title: Text(context.l10n.pairNewDevice),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(24),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                child: Material(
+                  color: entry.deviceId == selectedDeviceId
+                      ? colorScheme.secondaryContainer
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(24),
+                  child: ListTile(
+                    leading: Icon(
+                      entry.deviceType.contains('phone')
+                          ? Icons.smartphone
+                          : Icons.desktop_windows,
+                    ),
+                    title: Text(
+                      entry.name.isEmpty ? entry.deviceId : entry.name,
+                    ),
+                    selected: entry.deviceId == selectedDeviceId,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      onSelectDevice(entry.deviceId);
+                    },
                   ),
-                  onTap: () => _push(context, PairNewPage(appState: appState)),
                 ),
               ),
+            ListTile(
+              leading: const Icon(Icons.add_circle_outline),
+              title: Text(context.l10n.pairNewDevice),
+              onTap: () => _push(context, PairNewPage(appState: appState)),
             ),
             const Divider(),
             ListTile(

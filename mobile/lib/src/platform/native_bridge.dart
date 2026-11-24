@@ -89,4 +89,14 @@ class NativeBridge {
       await _channel.invokeMethod<void>('openBatteryOptimizationSettings');
     } catch (_) {}
   }
+
+  /// Open this app's page in the system notification settings,
+  /// where the persistent (keep-alive) notification and the
+  /// pairing notifications are switched on or off. This is the
+  /// settings page's "Persistent notification" row.
+  static Future<void> openNotificationSettings() async {
+    try {
+      await _channel.invokeMethod<void>('openNotificationSettings');
+    } catch (_) {}
+  }
 }

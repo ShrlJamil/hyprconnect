@@ -1,11 +1,17 @@
-//! Settings: this device's identity and status, where received files
-//! land, and the session log (all previously shown on the home page).
+//! Settings, modelled on the stock KDE Connect settings page:
+//! one flat list of rows. This device's name (editable), the
+//! theme, the persistent notification, devices added by IP, the
+//! log export, where received files land, and a closing note
+//! pointing at the per-device plugin settings. Battery and
+//! autostart no longer live here: they are the first-run setup
+//! gate now (see setup_gate_page.dart).
 
 import 'package:flutter/material.dart';
 
 import '../../l10n/l10n.dart';
 import '../platform/native_bridge.dart';
 import 'app_state.dart';
+import 'manual_devices_page.dart';
 
 class SettingsPage extends StatelessWidget {
   final AppState appState;
@@ -17,59 +23,75 @@ class SettingsPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(context.l10n.settings)),
       body: AnimatedBuilder(
-        animation: appState,
+        animation: Listenable.merge([appState, appState.prefs]),
         builder: (context, _) {
-          final identity = appState.identity;
+          final l = context.l10n;
+          final prefs = appState.prefs;
           return ListView(
-            padding: const EdgeInsets.all(16),
             children: [
-              Card(
-                child: ListTile(
-                  leading: const Icon(Icons.smartphone, size: 36),
-                  title: Text(context.l10n.thisDevice),
-                  subtitle: identity == null
-                      ? Text(appState.status)
-                      : SelectableText(
-                          '${identity.deviceName}\n'
-                          '${identity.deviceId}\n${appState.status}',
-                        ),
-                ),
+              ListTile(
+                title: Text(l.deviceName),
+                subtitle: Text(appState.identity?.deviceName ?? ''),
+                onTap: appState.identity == null
+                    ? null
+                    : () => _editDeviceName(context),
               ),
-              const SizedBox(height: 8),
-              const _BatteryCard(),
-              const SizedBox(height: 8),
-              const _AutostartCard(),
-              if (appState.receiveDirPath != null) ...[
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.folder, size: 36),
-                    title: Text(context.l10n.receivedFilesFolder),
-                    subtitle: SelectableText(appState.receiveDirPath!),
-                  ),
+              ListTile(
+                title: Text(l.chooseTheme),
+                subtitle: Text(
+                  switch (prefs.themeMode) {
+                    ThemeMode.light => l.themeLight,
+                    ThemeMode.dark => l.themeDark,
+                    ThemeMode.system => l.themeSystem,
+                  },
                 ),
-              ],
-              const SizedBox(height: 16),
-              Text(
-                context.l10n.log,
-                style: Theme.of(context).textTheme.titleMedium,
+                onTap: () => _chooseTheme(context),
               ),
-              const SizedBox(height: 8),
-              Container(
-                height: 300,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
+              ListTile(
+                title: Text(l.persistentNotification),
+                subtitle: Text(l.persistentNotificationBody),
+                onTap: () => NativeBridge.openNotificationSettings(),
+              ),
+              ListTile(
+                title: Text(l.addDeviceByIp),
+                subtitle: Text(
+                  l.manualDevicesCount(prefs.manualAddresses.length),
                 ),
-                child: ListView(
-                  children: [
-                    for (final line in appState.log)
-                      Text(line, style: const TextStyle(fontSize: 12)),
-                  ],
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (context) =>
+                          ManualDevicesPage(appState: appState),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                title: Text(l.exportLogs),
+                subtitle: Text(l.exportLogsBody),
+                onTap: () async {
+                  final path = await appState.exportLog();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        path == null
+                            ? l.exportLogsFailed
+                            : l.exportLogsSaved(path),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              if (appState.receiveDirPath != null)
+                ListTile(
+                  title: Text(l.receivedFilesFolder),
+                  subtitle: Text(appState.receiveDirPath!),
                 ),
+              const Divider(),
+              ListTile(
+                title: Text(l.moreSettings),
+                subtitle: Text(l.moreSettingsBody),
               ),
             ],
           );
@@ -77,84 +99,67 @@ class SettingsPage extends StatelessWidget {
       ),
     );
   }
-}
 
-/// Battery-optimization status: while the app is restricted, the
-/// system can kill it in the background and the connection dies
-/// with it. The button opens the system's own exemption dialog.
-class _BatteryCard extends StatefulWidget {
-  const _BatteryCard();
-
-  @override
-  State<_BatteryCard> createState() => _BatteryCardState();
-}
-
-class _BatteryCardState extends State<_BatteryCard> {
-  late Future<bool> _unrestricted;
-
-  @override
-  void initState() {
-    super.initState();
-    _unrestricted = NativeBridge.isIgnoringBatteryOptimizations();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: FutureBuilder<bool>(
-        future: _unrestricted,
-        builder: (context, snapshot) {
-          final unrestricted = snapshot.data ?? false;
-          return ListTile(
-            leading: const Icon(Icons.battery_saver, size: 36),
-            title: Text(context.l10n.batteryOptimization),
-            subtitle: Text(
-              unrestricted
-                  ? context.l10n.batteryUnrestricted
-                  : context.l10n.batteryRestricted,
-            ),
-            trailing: unrestricted
-                ? null
-                : TextButton(
-                    onPressed: () async {
-                      await NativeBridge.openBatteryOptimizationSettings();
-                      await Future<void>.delayed(const Duration(seconds: 1));
-                      if (mounted) {
-                        setState(() {
-                          _unrestricted =
-                              NativeBridge.isIgnoringBatteryOptimizations();
-                        });
-                      }
-                    },
-                    child: Text(context.l10n.batteryAllow),
-                  ),
-          );
-        },
-      ),
+  Future<void> _editDeviceName(BuildContext context) async {
+    final l = context.l10n;
+    final controller = TextEditingController(
+      text: appState.identity?.deviceName ?? '',
     );
-  }
-}
-
-/// Xiaomi's HyperOS / MIUI keeps a second, vendor-only gate for
-/// background survival: the Autostart switch. Without it the system
-/// can stop this app in the background even when the system battery
-/// exemption above is granted, which is exactly how a missing
-/// persistent notification presents. This card opens that page.
-class _AutostartCard extends StatelessWidget {
-  const _AutostartCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: const Icon(Icons.rocket_launch, size: 36),
-        title: Text(context.l10n.autostart),
-        subtitle: Text(context.l10n.autostartBody),
-        trailing: TextButton(
-          onPressed: () => NativeBridge.openAutostartSettings(),
-          child: Text(context.l10n.autostartOpen),
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l.deviceName),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (value) => Navigator.of(context).pop(value),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: Text(l.save),
+          ),
+        ],
       ),
     );
+    if (name != null) await appState.setDeviceName(name);
+  }
+
+  Future<void> _chooseTheme(BuildContext context) async {
+    final l = context.l10n;
+    final current = appState.prefs.themeMode;
+    final picked = await showDialog<ThemeMode>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(l.chooseTheme),
+        children: [
+          for (final option in <(ThemeMode, String)>[
+            (ThemeMode.system, l.themeSystem),
+            (ThemeMode.light, l.themeLight),
+            (ThemeMode.dark, l.themeDark),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(option.$1),
+              child: Row(
+                children: [
+                  Icon(
+                    option.$1 == current
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(option.$2),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (picked != null) await appState.prefs.setThemeMode(picked);
   }
 }

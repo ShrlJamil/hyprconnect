@@ -64,6 +64,10 @@ class MainActivity : FlutterActivity() {
                         openBatteryOptimizationSettings()
                         result.success(null)
                     }
+                    "openNotificationSettings" -> {
+                        openNotificationSettings()
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -125,6 +129,26 @@ class MainActivity : FlutterActivity() {
             } catch (e2: Exception) {
                 false
             }
+        }
+    }
+
+    /// The settings page's "Persistent notification" row: the
+    /// system notification settings for this app, where the
+    /// keep-alive and pairing notifications are controlled.
+    private fun openNotificationSettings() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                },
+            )
+        } catch (e: Exception) {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
         }
     }
 

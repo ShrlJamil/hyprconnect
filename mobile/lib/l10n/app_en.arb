@@ -234,5 +234,55 @@
   "batteryAllow": "Allow",
   "autostart": "Autostart (Xiaomi / HyperOS)",
   "autostartBody": "On Xiaomi phones the system also has its own Autostart switch. Turn it on for this app, or the system can stop it in the background even with unrestricted battery.",
-  "autostartOpen": "Open"
+  "autostartOpen": "Open",
+  "save": "Save",
+  "add": "Add",
+  "delete": "Delete",
+  "deviceName": "Device name",
+  "chooseTheme": "Choose theme",
+  "themeSystem": "System default",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "persistentNotification": "Persistent notification",
+  "persistentNotificationBody": "Tap to turn the persistent notification on or off in the system notification settings.",
+  "addDeviceByIp": "Add device by IP",
+  "manualDevicesCount": "{count} devices added manually",
+  "@manualDevicesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noManualDevices": "No devices added manually",
+  "noManualDevicesBody": "Add a desktop by its IP address when discovery cannot find it, for example on a network that blocks broadcasts.",
+  "manualDeviceTapHint": "Tap to announce to this address",
+  "manualDeviceProbing": "Announcing to {ip}. A device that answers appears under Pair new device.",
+  "@manualDeviceProbing": {
+    "placeholders": {
+      "ip": {
+        "type": "String"
+      }
+    }
+  },
+  "ipAddress": "IP address",
+  "ipAddressHint": "192.168.1.10",
+  "invalidIp": "That does not look like a valid IP address.",
+  "exportLogs": "Export app logs",
+  "exportLogsBody": "Save the session log to a file in the received files folder, where it can help troubleshoot issues.",
+  "exportLogsSaved": "Log saved to {path}",
+  "@exportLogsSaved": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "exportLogsFailed": "The log could not be saved yet.",
+  "moreSettings": "More settings",
+  "moreSettingsBody": "Each device's own settings can be found under Plugin settings on that device's page.",
+  "setupTitle": "Before you start",
+  "setupIntro": "Two system switches keep HyprConnect connected in the background. Both have to be on before you can continue.",
+  "autostartConfirm": "I have turned Autostart on for this app",
+  "setupContinue": "Continue"
 }

@@ -234,5 +234,55 @@
   "batteryAllow": "Izinkan",
   "autostart": "Autostart (Xiaomi / HyperOS)",
   "autostartBody": "Di HP Xiaomi sistem juga punya saklar Autostart sendiri. Nyalakan untuk aplikasi ini, atau sistem bisa menghentikannya di latar walau baterai sudah tanpa batas.",
-  "autostartOpen": "Buka"
+  "autostartOpen": "Buka",
+  "save": "Simpan",
+  "add": "Tambah",
+  "delete": "Hapus",
+  "deviceName": "Nama perangkat",
+  "chooseTheme": "Pilih tema",
+  "themeSystem": "Sistem Default",
+  "themeLight": "Terang",
+  "themeDark": "Gelap",
+  "persistentNotification": "Notifikasi kukuh",
+  "persistentNotificationBody": "Ketuk untuk mengatur notifikasi kukuh di pengaturan notifikasi sistem.",
+  "addDeviceByIp": "Tambahkan peranti dengan IP",
+  "manualDevicesCount": "{count} peranti ditambahkan manual",
+  "@manualDevicesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "noManualDevices": "Belum ada peranti yang ditambahkan manual",
+  "noManualDevicesBody": "Tambahkan desktop lewat alamat IP-nya kalau discovery tidak menemukannya, misalnya di jaringan yang memblokir broadcast.",
+  "manualDeviceTapHint": "Ketuk untuk mengumumkan ke alamat ini",
+  "manualDeviceProbing": "Mengumumkan ke {ip}. Peranti yang menjawab akan muncul di Pair perangkat baru.",
+  "@manualDeviceProbing": {
+    "placeholders": {
+      "ip": {
+        "type": "String"
+      }
+    }
+  },
+  "ipAddress": "Alamat IP",
+  "ipAddressHint": "192.168.1.10",
+  "invalidIp": "Alamat IP itu sepertinya tidak valid.",
+  "exportLogs": "Ekspor log aplikasi",
+  "exportLogsBody": "Simpan log sesi ke sebuah berkas di folder file diterima, bisa membantu memecahkan masalah.",
+  "exportLogsSaved": "Log tersimpan di {path}",
+  "@exportLogsSaved": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "exportLogsFailed": "Log belum bisa disimpan.",
+  "moreSettings": "Pengaturan selebihnya",
+  "moreSettingsBody": "Pengaturan tiap peranti bisa ditemukan di Pengaturan plugin pada halaman peranti itu.",
+  "setupTitle": "Sebelum mulai",
+  "setupIntro": "Dua sakelar sistem menjaga HyprConnect tetap tersambung di latar belakang. Keduanya harus menyala sebelum kamu bisa lanjut.",
+  "autostartConfirm": "Saya sudah menyalakan Autostart untuk aplikasi ini",
+  "setupContinue": "Lanjut"
 }

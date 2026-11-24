@@ -30,7 +30,10 @@ class DiscoveredDevice {
 }
 
 class Discovery {
-  final LocalIdentity identity;
+  /// The identity we announce. Not final: renaming this device
+  /// swaps in an updated identity so the next broadcast carries
+  /// the new name without restarting discovery.
+  LocalIdentity identity;
   final int tcpPort;
 
   RawDatagramSocket? _socket;
@@ -66,6 +69,26 @@ class Discovery {
     );
     final data = utf8.encode(jsonEncode(packet.toJson()));
     socket.send(data, InternetAddress('255.255.255.255'), discoveryPort);
+  }
+
+  /// Announce ourselves straight to one address instead of the
+  /// broadcast address: the "add device by IP" path, for desktops
+  /// the broadcast cannot reach. A desktop that hears it connects
+  /// back when it wants a channel (the daemon does exactly that
+  /// for unpaired devices), so a few repeats are enough.
+  Future<void> probeAddress(InternetAddress address) async {
+    final socket = _socket;
+    if (socket == null) return;
+    final packet = Packet.identity(
+      deviceId: identity.deviceId,
+      deviceName: identity.deviceName,
+      tcpPort: tcpPort,
+    );
+    final data = utf8.encode(jsonEncode(packet.toJson()));
+    for (var i = 0; i < 3; i++) {
+      socket.send(data, address, discoveryPort);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
   }
 
   void _onEvent(RawSocketEvent event) {

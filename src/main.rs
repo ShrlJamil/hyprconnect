@@ -4205,16 +4205,39 @@ impl Daemon {
     }
 }
 
+/// One axis of HyprPresenter-style pointer easing: close half of
+/// the remaining distance to the target per tick, snapping the
+/// final sub-`snap` remainder so the dot settles exactly on the
+/// target instead of creeping toward it forever.
+fn ease_axis(current: f64, target: f64, snap: f64) -> f64 {
+    let next = current + (target - current) * 0.5;
+    if (target - next).abs() <= snap {
+        target
+    } else {
+        next
+    }
+}
+
 #[derive(Default)]
 struct PresenterState {
     acc_x: f64,
     acc_y: f64,
     session: bool,
-    /// Dot position as fractions of the session monitor. The
+    /// Target dot position as fractions of the session monitor. The
     /// reference presenter accumulates the phone's raw gyro deltas
     /// exactly this way (y scaled by the screen ratio).
     fx: f64,
     fy: f64,
+    /// Position actually shown on screen. The pointer loop eases
+    /// this toward the target HyprPresenter-style (half the
+    /// remaining distance per 20 ms tick) so bursty delta packets
+    /// glide instead of teleporting the dot in chunks.
+    out_x: f64,
+    out_y: f64,
+    /// Session monitor size in pixels; the easing snaps to the
+    /// target once within half a pixel.
+    mon_w: u32,
+    mon_h: u32,
     /// Width over height of the session monitor.
     ratio: f64,
     last_packet: Option<std::time::Instant>,
@@ -4644,6 +4667,10 @@ impl Daemon {
             p.session = true;
             p.fx = 0.5;
             p.fy = 0.5;
+            p.out_x = 0.5;
+            p.out_y = 0.5;
+            p.mon_w = pick.w.max(0) as u32;
+            p.mon_h = pick.h.max(0) as u32;
             p.ratio = if pick.h > 0 {
                 pick.w as f64 / pick.h as f64
             } else {
@@ -4657,8 +4684,11 @@ impl Daemon {
         log(&format!("presenter session started on {}", pick.name));
     }
 
-    /// Applies accumulated pointer deltas at ~50 Hz so a burst of
-    /// gyro packets becomes one smooth dot move.
+    /// Pointer loop at ~50 Hz, HyprPresenter-style: accumulated
+    /// gyro deltas only move the TARGET; the shown position eases
+    /// halfway toward it per tick, so packets arriving in bursts
+    /// become a continuous glide and the newest target always wins
+    /// (there is no backlog of stale positions to crawl through).
     async fn presenter_pointer_loop(self: Arc<Self>) {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -4676,7 +4706,7 @@ impl Daemon {
                     p.acc_y = 0.0;
                     timed_out = true;
                 }
-                if !p.session || (p.acc_x == 0.0 && p.acc_y == 0.0) {
+                if !p.session {
                     None
                 } else {
                     let (dx, dy) = (p.acc_x, p.acc_y);
@@ -4684,7 +4714,25 @@ impl Daemon {
                     p.acc_y = 0.0;
                     p.fx = (p.fx + dx).clamp(0.0, 1.0);
                     p.fy = (p.fy + dy * p.ratio).clamp(0.0, 1.0);
-                    Some((p.fx, p.fy))
+                    let snap_x = if p.mon_w > 0 {
+                        0.5 / p.mon_w as f64
+                    } else {
+                        0.5 / 1920.0
+                    };
+                    let snap_y = if p.mon_h > 0 {
+                        0.5 / p.mon_h as f64
+                    } else {
+                        0.5 / 1080.0
+                    };
+                    let nx = ease_axis(p.out_x, p.fx, snap_x);
+                    let ny = ease_axis(p.out_y, p.fy, snap_y);
+                    if nx != p.out_x || ny != p.out_y {
+                        p.out_x = nx;
+                        p.out_y = ny;
+                        Some((nx, ny))
+                    } else {
+                        None
+                    }
                 }
             };
             if timed_out {
@@ -4699,5 +4747,48 @@ impl Daemon {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod presenter_ease_tests {
+    use super::ease_axis;
+
+    #[test]
+    fn halves_the_remaining_gap_each_tick() {
+        assert_eq!(ease_axis(0.0, 1.0, 0.0), 0.5);
+        assert_eq!(ease_axis(0.5, 1.0, 0.0), 0.75);
+        assert_eq!(ease_axis(1.0, 0.0, 0.0), 0.5);
+    }
+
+    #[test]
+    fn snaps_the_final_subpixel_step() {
+        // next would be 0.95, remaining 0.05 <= snap 0.2 -> exact target.
+        assert_eq!(ease_axis(0.9, 1.0, 0.2), 1.0);
+        // Already on target: stays exactly, so the loop stops emitting.
+        assert_eq!(ease_axis(0.5, 0.5, 0.001), 0.5);
+    }
+
+    #[test]
+    fn a_burst_target_becomes_a_glide_with_shrinking_steps() {
+        // One burst moves the target 0.2 -> 0.8 at once (what a packet
+        // burst did to the shown position before easing). The shown
+        // position must now approach monotonically, never overshoot,
+        // with strictly shrinking steps, and settle exactly on target.
+        let snap = 0.5 / 1920.0;
+        let mut pos = 0.2;
+        let mut prev_step = f64::INFINITY;
+        let mut steps = 0;
+        while pos != 0.8 {
+            let next = ease_axis(pos, 0.8, snap);
+            assert!(next > pos && next <= 0.8, "monotonic, no overshoot");
+            let step = next - pos;
+            assert!(step < prev_step, "steps shrink as it glides");
+            prev_step = step;
+            pos = next;
+            steps += 1;
+            assert!(steps < 40, "settles quickly");
+        }
+        assert!(steps >= 8, "a burst spreads over many ticks, got {steps}");
     }
 }

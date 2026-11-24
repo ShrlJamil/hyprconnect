@@ -572,7 +572,7 @@ fn run(
     wake: &std::fs::File,
     log: &dyn Fn(&str),
 ) -> anyhow::Result<()> {
-    let conn = Connection::connect_to_env().context("connect to Wayland")?;
+    let conn = crate::wayland::connect("presenter dot", log);
     let mut queue = conn.new_event_queue::<DotState>();
     let qh = queue.handle();
     let _registry = conn.display().get_registry(&qh, 0u32);

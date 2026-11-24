@@ -247,8 +247,9 @@ impl Dispatch<ExtDataControlSourceV1, ()> for WlState {
     }
 }
 
-/// Spawn the clipboard thread. Returns None (with a log line) when no
-/// Wayland session is reachable; the daemon runs fine without it.
+/// Spawn the clipboard thread. The thread waits for a Wayland
+/// compositor when the daemon starts before the graphical session;
+/// the daemon's network side runs fine in the meantime.
 pub fn spawn(
     changed_tx: tokio::sync::mpsc::Sender<String>,
     log: impl Fn(&str) + Send + 'static,
@@ -274,7 +275,7 @@ fn run(
     log: &dyn Fn(&str),
 ) -> anyhow::Result<()> {
     use anyhow::Context;
-    let conn = Connection::connect_to_env().context("connect to Wayland")?;
+    let conn = crate::wayland::connect("clipboard", log);
     let (globals, mut queue) =
         wayland_client::globals::registry_queue_init::<WlState>(&conn)
             .context("registry init")?;

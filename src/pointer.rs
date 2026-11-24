@@ -77,7 +77,7 @@ pub fn spawn(log: impl Fn(&str) + Send + 'static) -> Option<PointerHandle> {
     let wake_read = wake.clone();
     std::thread::Builder::new()
         .name("remote-pointer".into())
-        .spawn(move || match run(cmd_rx, &wake_read) {
+        .spawn(move || match run(cmd_rx, &wake_read, &log) {
             Ok(()) => {}
             Err(e) => log(&format!("remote input pointer unavailable: {:#}", e)),
         })
@@ -191,8 +191,9 @@ fn apply(
 fn run(
     cmd_rx: std_mpsc::Receiver<PointerCmd>,
     wake: &std::fs::File,
+    log: &dyn Fn(&str),
 ) -> anyhow::Result<()> {
-    let conn = Connection::connect_to_env().context("connect to Wayland")?;
+    let conn = crate::wayland::connect("remote input pointer", log);
     let mut queue = conn.new_event_queue::<PointerState>();
     let qh = queue.handle();
     let _registry = conn.display().get_registry(&qh, 0u32);

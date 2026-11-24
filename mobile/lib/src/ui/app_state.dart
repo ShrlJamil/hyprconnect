@@ -76,6 +76,10 @@ class AppState extends ChangeNotifier {
   final List<String> _log = [];
   Directory? _receiveDir;
   final List<ReceivedFile> _receivedFiles = [];
+  // Battery reporting: the last state sent per device, so the
+  // periodic refresh only talks when something changed.
+  final Map<String, String> _lastBatterySent = {};
+  Timer? _batteryTimer;
   String? _lastReceivedClipboard;
   String? _lastReceivedFrom;
   DateTime? _lastReceivedAt;
@@ -148,7 +152,12 @@ class AppState extends ChangeNotifier {
   DateTime? get lastReceivedAt => _lastReceivedAt;
 
   /// Where files from peers are saved, if known yet.
-  String? get receiveDirPath => _receiveDir?.path;
+  /// Where received files end up for the user: they are staged
+  /// in the app's private dir during transfer, then published
+  /// into the public Download/HyprConnect folder. This label is
+  /// what the settings page shows.
+  String? get receiveDirPath =>
+      _receiveDir == null ? null : 'Download/HyprConnect';
 
   /// M3: desktop player names known for a device (empty when none
   /// reported yet).
@@ -322,6 +331,15 @@ class AppState extends ChangeNotifier {
       }
       _status = 'Listening on port $port';
       _logLine('Identity: ${identity.deviceId}');
+      // Battery levels drift while a connection lives: re-check
+      // every minute and report only changes (explicit requests
+      // from the desktop are answered separately, in the packet
+      // dispatch).
+      _batteryTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+        for (final conn in _connections.values) {
+          unawaited(_sendBattery(conn));
+        }
+      });
       notifyListeners();
     } catch (e) {
       _status = 'Failed to start: $e';
@@ -329,9 +347,12 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Files from peers land in HyprConnect/ under external storage on
-  /// Android (visible in a file manager); anywhere else, under the
-  /// app documents directory.
+  /// Staging dir for incoming files: HyprConnect/ under the
+  /// app-specific external dir on Android. Files only pass
+  /// through here; on completion they are published into the
+  /// public Download/HyprConnect folder (see
+  /// _publishReceivedFile), because the app-specific dir is
+  /// hidden from file managers on modern Android.
   Future<Directory> _resolveReceiveDir() async {
     try {
       final ext = await getExternalStorageDirectory();
@@ -399,6 +420,12 @@ class AppState extends ChangeNotifier {
           _handleRunCommandOutput(conn, packet);
         case 'kdeconnect.presenter':
           _handlePresenter(conn, packet);
+        case 'kdeconnect.battery.request':
+          if (packet.body['request'] == true) {
+            await _sendBattery(conn, force: true);
+          }
+        case 'kdeconnect.sftp.request':
+          await _handleSftpRequest(conn);
       }
     } catch (e) {
       _logLine('Failed to handle ${packet.type}: $e');
@@ -562,13 +589,139 @@ class AppState extends ChangeNotifier {
     }
     try {
       final received = await conn.receiveFile(packet, dir);
-      _receivedFiles.insert(0, received);
+      final published = await _publishReceivedFile(received);
+      _receivedFiles.insert(0, published);
       _logLine(
-        'File received: ${received.filename} (${received.size} bytes) '
-        '-> ${received.path}',
+        'File received: ${published.filename} (${published.size} bytes) '
+        '-> ${published.path}',
       );
     } catch (e) {
       _logLine('Failed to receive file from ${conn.remoteName}: $e');
+    }
+  }
+
+  /// Publish a freshly received file from the private staging
+  /// dir into the public Download/HyprConnect folder, where the
+  /// user can actually find it in a file manager. Falls back to
+  /// the staged copy when the export is unavailable.
+  Future<ReceivedFile> _publishReceivedFile(ReceivedFile received) async {
+    final publicPath = await NativeBridge.exportToDownloads(
+      received.path,
+      received.filename,
+    );
+    if (publicPath == null) return received;
+    try {
+      await File(received.path).delete();
+    } catch (_) {
+      // A leftover staged copy is harmless.
+    }
+    return ReceivedFile(
+      filename: received.filename,
+      path: publicPath,
+      size: received.size,
+      deviceId: received.deviceId,
+      deviceName: received.deviceName,
+      receivedAt: received.receivedAt,
+    );
+  }
+
+  /// Answer a battery request (and report changes while a
+  /// connection lives): read the phone's battery natively and
+  /// send the kdeconnect.battery packet the daemon stores for
+  /// the desktop's device page. [force] bypasses the unchanged
+  /// check for explicit requests.
+  Future<void> _sendBattery(
+    DeviceConnection conn, {
+    bool force = false,
+  }) async {
+    if (!conn.isPaired || conn.disabledPlugins.contains('battery')) return;
+    final status = await NativeBridge.batteryStatus();
+    if (status == null) return;
+    final level = (status['level'] as num?)?.toInt();
+    final id = conn.remoteDeviceId;
+    if (level == null || id == null) return;
+    final charging = status['charging'] == true;
+    final signature = '$level|$charging';
+    if (!force && _lastBatterySent[id] == signature) return;
+    _lastBatterySent[id] = signature;
+    await conn.sendPacket(
+      Packet.now('kdeconnect.battery', {
+        'currentCharge': level,
+        'isCharging': charging,
+        'thresholdEvent': 0,
+      }),
+    );
+  }
+
+  /// A desktop wants to browse this phone: start the embedded
+  /// SFTP server and answer with the kdeconnect.sftp parameter
+  /// packet, like the stock app does. Without all-files access
+  /// the shared storage cannot be served; the refusal is logged
+  /// here and the desktop shows its own error.
+  Future<void> _handleSftpRequest(DeviceConnection conn) async {
+    if (!conn.isPaired || conn.disabledPlugins.contains('sftp')) return;
+    await conn.sendPacket(
+      Packet.now('kdeconnect.sftp', {'serverRunning': false}),
+    );
+    if (!await NativeBridge.hasAllFilesAccess()) {
+      _logLine(
+        'SFTP browse from ${conn.remoteName} refused: '
+        'all-files access is not granted',
+      );
+      return;
+    }
+    final server = await NativeBridge.startSftpServer();
+    if (server == null) {
+      _logLine('SFTP server failed to start for ${conn.remoteName}');
+      return;
+    }
+    final ip = await _localAddressFor(conn.remoteAddress);
+    if (ip == null) {
+      _logLine('SFTP: no local address to advertise');
+      return;
+    }
+    await conn.sendPacket(
+      Packet.now('kdeconnect.sftp', {
+        'ip': ip,
+        'port': server['port'],
+        'user': server['user'],
+        'password': server['password'],
+        'path': '/storage/emulated/0',
+        'multiPaths': ['/storage/emulated/0'],
+        'pathNames': ['Internal storage'],
+      }),
+    );
+    _logLine(
+      'SFTP server started for ${conn.remoteName} on port ${server['port']}',
+    );
+  }
+
+  /// The local IPv4 address a peer can reach us at: the one on
+  /// the same subnet as the peer when that can be determined.
+  Future<String?> _localAddressFor(InternetAddress? remote) async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      final addresses = [for (final iface in interfaces) ...iface.addresses];
+      if (addresses.isEmpty) return null;
+      if (remote != null && remote.type == InternetAddressType.IPv4) {
+        final remoteParts = remote.address.split('.');
+        for (final address in addresses) {
+          final parts = address.address.split('.');
+          if (parts.length == 4 &&
+              remoteParts.length == 4 &&
+              parts[0] == remoteParts[0] &&
+              parts[1] == remoteParts[1] &&
+              parts[2] == remoteParts[2]) {
+            return address.address;
+          }
+        }
+      }
+      return addresses.first.address;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -644,6 +797,9 @@ class AppState extends ChangeNotifier {
         // devices disappear from the drawer and the shell again.
         if (_connections[id] == conn) {
           _connections.remove(id);
+          _lastBatterySent.remove(id);
+          // The browse server only exists for a live peer.
+          unawaited(NativeBridge.stopSftpServer());
           notifyListeners();
         }
       },
@@ -681,6 +837,9 @@ class AppState extends ChangeNotifier {
     }
     for (final device in _found.values) {
       _maybeAutoConnect(device);
+    }
+    for (final conn in _connections.values) {
+      unawaited(_sendBattery(conn));
     }
   }
 
@@ -871,6 +1030,19 @@ class AppState extends ChangeNotifier {
       buffer.writeln(line);
     }
     await file.writeAsString(buffer.toString());
+    // Publish into Download/HyprConnect like received files, so
+    // the export is findable with a file manager too.
+    final publicPath = await NativeBridge.exportToDownloads(
+      file.path,
+      file.uri.pathSegments.last,
+    );
+    if (publicPath != null) {
+      try {
+        await file.delete();
+      } catch (_) {}
+      _logLine('Log exported to $publicPath');
+      return publicPath;
+    }
     _logLine('Log exported to ${file.path}');
     return file.path;
   }
@@ -1390,6 +1562,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _batteryTimer?.cancel();
     for (final conn in _connections.values) {
       unawaited(conn.close());
     }

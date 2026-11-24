@@ -665,8 +665,26 @@ abstract class AppLocalizations {
   /// No description provided for @pluginSftpDesc.
   ///
   /// In en, this message translates to:
-  /// **'Access desktop files over SFTP.'**
+  /// **'Let a paired desktop browse this phone\'s files.'**
   String get pluginSftpDesc;
+
+  /// No description provided for @sftpAccessTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'File access for browsing'**
+  String get sftpAccessTitle;
+
+  /// No description provided for @sftpAccessGranted.
+  ///
+  /// In en, this message translates to:
+  /// **'All-files access granted, desktops can browse this phone'**
+  String get sftpAccessGranted;
+
+  /// No description provided for @sftpAccessMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'All-files access not granted, tap to allow browsing'**
+  String get sftpAccessMissing;
 
   /// No description provided for @pluginShare.
   ///

@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/l10n.dart';
+import '../platform/native_bridge.dart';
 import '../settings/plugin_settings.dart';
 import 'app_state.dart';
 import 'plugin_text.dart';
@@ -40,7 +41,7 @@ class PluginSettingsPage extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
-              for (final plugin in pluginCatalog)
+              for (final plugin in pluginCatalog) ...[
                 SwitchListTile(
                   title: Text(pluginTitle(context.l10n, plugin.id)),
                   subtitle: Text(pluginDescription(context.l10n, plugin.id)),
@@ -53,10 +54,38 @@ class PluginSettingsPage extends StatelessWidget {
                     );
                   },
                 ),
+                if (plugin.id == 'sftp') _sftpAccessTile(context),
+              ],
             ],
           );
         },
       ),
+    );
+  }
+
+  /// The sftp plugin serves this phone's storage to the
+  /// desktop, which needs the system's all-files access. The
+  /// row sits next to the plugin's own switch and refreshes
+  /// whenever this page rebuilds.
+  Widget _sftpAccessTile(BuildContext context) {
+    final l = context.l10n;
+    return FutureBuilder<bool>(
+      future: NativeBridge.hasAllFilesAccess(),
+      builder: (context, snapshot) {
+        final granted = snapshot.data ?? false;
+        return ListTile(
+          leading: const Icon(Icons.folder_shared_outlined),
+          title: Text(l.sftpAccessTitle),
+          subtitle: Text(
+            granted ? l.sftpAccessGranted : l.sftpAccessMissing,
+          ),
+          trailing: granted ? null : const Icon(Icons.chevron_right),
+          enabled: !granted,
+          onTap: granted
+              ? null
+              : () => NativeBridge.openAllFilesAccessSettings(),
+        );
+      },
     );
   }
 }

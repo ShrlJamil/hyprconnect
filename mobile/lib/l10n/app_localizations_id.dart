@@ -319,7 +319,19 @@ class AppLocalizationsId extends AppLocalizations {
   String get pluginSftp => 'Jelajah file (SFTP)';
 
   @override
-  String get pluginSftpDesc => 'Akses file desktop lewat SFTP.';
+  String get pluginSftpDesc =>
+      'Izinkan desktop pasangan menjelajah file HP ini.';
+
+  @override
+  String get sftpAccessTitle => 'Akses file untuk penjelajahan';
+
+  @override
+  String get sftpAccessGranted =>
+      'Akses semua file sudah diberikan, desktop bisa menjelajah HP ini';
+
+  @override
+  String get sftpAccessMissing =>
+      'Akses semua file belum diberikan, ketuk untuk mengizinkan';
 
   @override
   String get pluginShare => 'Kirim file';

@@ -4,13 +4,19 @@ import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.PowerManager
+import android.provider.MediaStore
 import android.provider.Settings
+import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -95,6 +101,47 @@ class MainActivity : FlutterActivity() {
                         val path = call.argument<String>("path") ?: ""
                         result.success(installApk(path))
                     }
+                    "batteryStatus" -> {
+                        result.success(batteryStatus())
+                    }
+                    "exportToDownloads" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        val name = call.argument<String>("name") ?: ""
+                        result.success(exportToDownloads(path, name))
+                    }
+                    "hasAllFilesAccess" -> {
+                        result.success(
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.R ||
+                                Environment.isExternalStorageManager(),
+                        )
+                    }
+                    "openAllFilesAccessSettings" -> {
+                        openAllFilesAccessSettings()
+                        result.success(null)
+                    }
+                    "startSftpServer" -> {
+                        // Binding and key generation do not
+                        // belong on the platform thread.
+                        Thread {
+                            val info = SftpServer.start()
+                            android.os.Handler(android.os.Looper.getMainLooper())
+                                .post {
+                                    result.success(
+                                        info?.let {
+                                            mapOf(
+                                                "port" to it.port,
+                                                "user" to it.user,
+                                                "password" to it.password,
+                                            )
+                                        },
+                                    )
+                                }
+                        }.start()
+                    }
+                    "stopSftpServer" -> {
+                        SftpServer.stop()
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -132,6 +179,97 @@ class MainActivity : FlutterActivity() {
             true
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /// The phone's current battery state for the battery
+    /// plugin: the sticky ACTION_BATTERY_CHANGED intent carries
+    /// level, scale and charging status without a receiver ever
+    /// having to be registered.
+    private fun batteryStatus(): Map<String, Any> {
+        val intent = registerReceiver(
+            null,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+        )
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val percent = if (level >= 0 && scale > 0) level * 100 / scale else -1
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL
+        return mapOf("level" to percent, "charging" to charging)
+    }
+
+    /// Copy a file from the app's private staging folder into
+    /// the public Download/HyprConnect folder through
+    /// MediaStore, so received files are visible in the file
+    /// manager. Returns the public display path, or null below
+    /// Android 10 or on any failure.
+    private fun exportToDownloads(path: String, name: String): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val source = java.io.File(path)
+        if (!source.exists()) return null
+        val resolver = contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/HyprConnect")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+            val ext = name.substringAfterLast('.', "")
+            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+            if (mime != null) put(MediaStore.MediaColumns.MIME_TYPE, mime)
+        }
+        val uri = resolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            values,
+        ) ?: return null
+        try {
+            val stream = resolver.openOutputStream(uri)
+            if (stream == null) {
+                resolver.delete(uri, null, null)
+                return null
+            }
+            stream.use { out ->
+                source.inputStream().use { input -> input.copyTo(out) }
+            }
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            // Read the real display name back: MediaStore
+            // renames duplicates, and the app shows this path.
+            var displayName = name
+            resolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) displayName = cursor.getString(0)
+            }
+            return "Download/HyprConnect/$displayName"
+        } catch (e: Exception) {
+            try {
+                resolver.delete(uri, null, null)
+            } catch (_: Exception) {
+            }
+            return null
+        }
+    }
+
+    /// The system page where the user grants this app access
+    /// to all files, which the SFTP server needs to serve the
+    /// shared storage.
+    private fun openAllFilesAccessSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+        } catch (e: Exception) {
+            startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
         }
     }
 

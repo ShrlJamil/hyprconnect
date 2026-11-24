@@ -323,7 +323,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pluginSftp => 'Browse files (SFTP)';
 
   @override
-  String get pluginSftpDesc => 'Access desktop files over SFTP.';
+  String get pluginSftpDesc =>
+      'Let a paired desktop browse this phone\'s files.';
+
+  @override
+  String get sftpAccessTitle => 'File access for browsing';
+
+  @override
+  String get sftpAccessGranted =>
+      'All-files access granted, desktops can browse this phone';
+
+  @override
+  String get sftpAccessMissing =>
+      'All-files access not granted, tap to allow browsing';
 
   @override
   String get pluginShare => 'Send file';

@@ -143,4 +143,81 @@ class NativeBridge {
       return false;
     }
   }
+
+  /// The phone's current battery state as {level: 0-100,
+  /// charging: bool}, or null when it cannot be read. The battery
+  /// plugin answers kdeconnect.battery.request packets with this
+  /// and reports changes with it.
+  static Future<Map<String, dynamic>?> batteryStatus() async {
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'batteryStatus',
+      );
+      if (raw == null) return null;
+      return raw.map((key, value) => MapEntry(key.toString(), value));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Copy a received file from the app's private staging folder
+  /// into the public Download/HyprConnect folder through
+  /// MediaStore, so it shows up in the file manager like a normal
+  /// download. Returns the public display path (for example
+  /// "Download/HyprConnect/name.ext"), or null when the export
+  /// failed and the staged copy is the only one.
+  static Future<String?> exportToDownloads(String path, String name) async {
+    try {
+      return await _channel.invokeMethod<String>('exportToDownloads', {
+        'path': path,
+        'name': name,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether the system grants this app access to all files,
+  /// which the SFTP server needs to serve the shared storage.
+  /// True below Android 11, where the broad access does not
+  /// exist as a separate grant.
+  static Future<bool> hasAllFilesAccess() async {
+    try {
+      return await _channel.invokeMethod<bool>('hasAllFilesAccess') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Open the system page where the user grants all-files
+  /// access to this app.
+  static Future<void> openAllFilesAccessSettings() async {
+    try {
+      await _channel.invokeMethod<void>('openAllFilesAccessSettings');
+    } catch (_) {}
+  }
+
+  /// Start the embedded SFTP server that lets a paired desktop
+  /// browse this phone's shared storage. Returns {port, user,
+  /// password} for the kdeconnect.sftp parameter packet, or null
+  /// when the server could not start.
+  static Future<Map<String, dynamic>?> startSftpServer() async {
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'startSftpServer',
+      );
+      if (raw == null) return null;
+      return raw.map((key, value) => MapEntry(key.toString(), value));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Stop the embedded SFTP server, if it is running.
+  static Future<void> stopSftpServer() async {
+    try {
+      await _channel.invokeMethod<void>('stopSftpServer');
+    } catch (_) {}
+  }
 }

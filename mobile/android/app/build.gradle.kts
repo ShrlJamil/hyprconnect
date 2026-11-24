@@ -35,6 +35,22 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
+    packaging {
+        resources {
+            // Every MINA SSHD jar ships the same metadata
+            // files; the merge only needs one copy of each.
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/NOTICE",
+            )
         }
     }
 }
@@ -47,4 +63,16 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // The embedded SFTP server behind the sftp plugin (a paired
+    // desktop browsing this phone), plus the logging facade it
+    // links against and the full-strength crypto provider its
+    // algorithm negotiation wants on Android.
+    implementation("org.apache.sshd:sshd-core:2.14.0")
+    implementation("org.apache.sshd:sshd-sftp:2.14.0")
+    implementation("org.slf4j:slf4j-api:2.0.13")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("net.i2p.crypto:eddsa:0.3.0")
 }

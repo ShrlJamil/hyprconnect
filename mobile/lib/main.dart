@@ -23,13 +23,23 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final appDir = await getApplicationDocumentsDirectory();
   final prefs = await AppPrefs.load(appDir);
-  runApp(HyprConnectApp(prefs: prefs));
+  // The connection core starts here, not from a widget: the
+  // engine can be started by the keep-alive service with no
+  // activity attached (after the system killed the process), and
+  // widget lifecycle callbacks wait for the first frame in that
+  // case, while the listener must come up immediately. The
+  // AppState lives for the engine's whole lifetime; the UI just
+  // observes it.
+  final appState = AppState(prefs: prefs);
+  appState.initialize();
+  runApp(HyprConnectApp(prefs: prefs, appState: appState));
 }
 
 class HyprConnectApp extends StatelessWidget {
   final AppPrefs prefs;
+  final AppState appState;
 
-  const HyprConnectApp({super.key, required this.prefs});
+  const HyprConnectApp({super.key, required this.prefs, required this.appState});
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +62,7 @@ class HyprConnectApp extends StatelessWidget {
             useMaterial3: true,
           ),
           themeMode: prefs.themeMode,
-          home: HomePage(prefs: prefs),
+          home: HomePage(prefs: prefs, appState: appState),
         );
       },
     );
@@ -61,23 +71,22 @@ class HyprConnectApp extends StatelessWidget {
 
 class HomePage extends StatefulWidget {
   final AppPrefs prefs;
+  final AppState appState;
 
-  const HomePage({super.key, required this.prefs});
+  const HomePage({super.key, required this.prefs, required this.appState});
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
-  late final AppState _appState;
+  AppState get _appState => widget.appState;
   String? _selectedDeviceId;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _appState = AppState(prefs: widget.prefs);
-    _appState.initialize();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeCheckForUpdates();
     });
@@ -111,7 +120,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _appState.dispose();
+    // The AppState is not disposed here: it belongs to the
+    // engine, which outlives this page (and the activity).
     super.dispose();
   }
 

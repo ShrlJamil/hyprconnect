@@ -17,10 +17,11 @@ import androidx.core.content.ContextCompat
 /// Keeps this process at foreground-service importance so Android
 /// does not kill the discovery broadcaster and the TCP listener
 /// while the app is in the background, the same approach KDE
-/// Connect uses. The service itself does no protocol work: it holds
-/// a multicast lock (so UDP discovery broadcasts are received with
-/// the screen off) and a Wi-Fi lock, and shows the mandatory
-/// persistent notification.
+/// Connect uses. The service holds a multicast lock (so UDP
+/// discovery broadcasts are received with the screen off) and a
+/// Wi-Fi lock, shows the mandatory persistent notification, and
+/// owns the Flutter engine through EngineHost, so a revived
+/// service revives the connection itself, not just the process.
 ///
 /// Every lifecycle outcome is recorded to SharedPreferences so the
 /// Dart side can show it in the in-app log: on OEM builds (MIUI /
@@ -58,6 +59,13 @@ class KeepAliveService : Service() {
             record(this, "startForeground failed: ${e.javaClass.simpleName}: ${e.message}")
             throw e
         }
+        // The service owns the connection's survival, so it also
+        // owns the Flutter engine: (re)creating it here is what
+        // brings the Dart side, and with it the TCP listener and
+        // discovery, back after the system killed the process.
+        // Before this, a revived service held locks and a
+        // notification while nothing listened anymore.
+        EngineHost.ensureStarted(applicationContext)
     }
 
     private fun startForegroundWithNotification() {

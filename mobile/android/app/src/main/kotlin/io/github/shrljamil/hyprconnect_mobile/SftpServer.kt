@@ -28,6 +28,15 @@ object SftpServer {
 
     private var server: SshServer? = null
 
+    // The running server's parameters. A repeated browse request
+    // while the server is up must be answered with these exact
+    // parameters, never with a restart: the desktop's sshfs mount
+    // is attached to this instance, and replacing it (new port is
+    // not the problem, new password is) leaves the mount reading
+    // a dead session, which shows up as empty folders.
+    @Volatile
+    private var currentInfo: Info? = null
+
     data class Info(val port: Int, val user: String, val password: String)
 
     @Synchronized
@@ -51,6 +60,9 @@ object SftpServer {
             PathUtils.setUserHomeFolderResolver { Paths.get(homeDir) }
         } catch (_: Throwable) {
         }
+        currentInfo?.let { existing ->
+            if (server != null) return existing
+        }
         stopLocked()
         ensureFullCryptoProvider()
         val candidate = randomPassword()
@@ -70,7 +82,9 @@ object SftpServer {
                 sshd.fileSystemFactory = NativeFileSystemFactory()
                 sshd.start()
                 server = sshd
-                return Info(port, USER, candidate)
+                val info = Info(port, USER, candidate)
+                currentInfo = info
+                return info
             } catch (e: Throwable) {
                 try {
                     sshd?.stop(true)
@@ -85,6 +99,7 @@ object SftpServer {
     fun stop() = stopLocked()
 
     private fun stopLocked() {
+        currentInfo = null
         try {
             server?.stop(true)
         } catch (_: Exception) {

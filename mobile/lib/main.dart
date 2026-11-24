@@ -16,6 +16,8 @@ import 'src/ui/app_drawer.dart';
 import 'src/ui/app_state.dart';
 import 'src/ui/device_page.dart';
 import 'src/ui/setup_gate_page.dart';
+import 'src/ui/update_dialog.dart';
+import 'src/update/update_checker.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,6 +78,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _appState = AppState(prefs: widget.prefs);
     _appState.initialize();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeCheckForUpdates();
+    });
+  }
+
+  bool _updateCheckStarted = false;
+
+  /// The automatic update check: at most once a day, only past
+  /// the setup gate, and silent when nothing is available.
+  Future<void> _maybeCheckForUpdates() async {
+    if (_updateCheckStarted) return;
+    _updateCheckStarted = true;
+    final prefs = _appState.prefs;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - prefs.lastUpdateCheckMillis < 86400000) return;
+    await prefs.markUpdateChecked(now);
+    if (_appState.setupGateRequired) return;
+    final info = await UpdateChecker.checkForUpdate();
+    if (info != null && mounted) {
+      await showUpdateDialog(context, info);
+    }
   }
 
   @override

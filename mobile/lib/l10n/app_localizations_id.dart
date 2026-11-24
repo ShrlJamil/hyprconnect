@@ -631,4 +631,38 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get setupContinue => 'Lanjut';
+
+  @override
+  String get checkForUpdates => 'Periksa pembaruan';
+
+  @override
+  String get updateAvailableTitle => 'Ada versi baru';
+
+  @override
+  String get updateDownload => 'Unduh';
+
+  @override
+  String get updateInstall => 'Pasang';
+
+  @override
+  String get updateLater => 'Nanti';
+
+  @override
+  String get updateDownloading => 'Mengunduh pembaruan…';
+
+  @override
+  String get updateUpToDate => 'Kamu sudah memakai versi terbaru.';
+
+  @override
+  String get updateCheckFailed => 'Tidak bisa memeriksa pembaruan.';
+
+  @override
+  String get updateFailed => 'Pembaruan gagal diunduh.';
+
+  @override
+  String get updateReady => 'Pembaruan sudah terunduh dan siap dipasang.';
+
+  @override
+  String get updatePermissionHint =>
+      'Izinkan pemasangan dari aplikasi ini di halaman pengaturan yang terbuka, lalu kembali dan ketuk Pasang lagi.';
 }

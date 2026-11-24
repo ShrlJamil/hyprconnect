@@ -635,4 +635,38 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get setupContinue => 'Continue';
+
+  @override
+  String get checkForUpdates => 'Check for updates';
+
+  @override
+  String get updateAvailableTitle => 'A new version is available';
+
+  @override
+  String get updateDownload => 'Download';
+
+  @override
+  String get updateInstall => 'Install';
+
+  @override
+  String get updateLater => 'Later';
+
+  @override
+  String get updateDownloading => 'Downloading update…';
+
+  @override
+  String get updateUpToDate => 'You are on the latest version.';
+
+  @override
+  String get updateCheckFailed => 'Could not check for updates.';
+
+  @override
+  String get updateFailed => 'The update could not be downloaded.';
+
+  @override
+  String get updateReady => 'The update is downloaded and ready to install.';
+
+  @override
+  String get updatePermissionHint =>
+      'Allow installs from this app on the settings page that opened, then come back and tap Install again.';
 }

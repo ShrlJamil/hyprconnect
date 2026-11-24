@@ -284,5 +284,16 @@
   "setupTitle": "Before you start",
   "setupIntro": "Two system switches keep HyprConnect connected in the background. Both have to be on before you can continue.",
   "autostartConfirm": "I have turned Autostart on for this app",
-  "setupContinue": "Continue"
+  "setupContinue": "Continue",
+  "checkForUpdates": "Check for updates",
+  "updateAvailableTitle": "A new version is available",
+  "updateDownload": "Download",
+  "updateInstall": "Install",
+  "updateLater": "Later",
+  "updateDownloading": "Downloading update…",
+  "updateUpToDate": "You are on the latest version.",
+  "updateCheckFailed": "Could not check for updates.",
+  "updateFailed": "The update could not be downloaded.",
+  "updateReady": "The update is downloaded and ready to install.",
+  "updatePermissionHint": "Allow installs from this app on the settings page that opened, then come back and tap Install again."
 }

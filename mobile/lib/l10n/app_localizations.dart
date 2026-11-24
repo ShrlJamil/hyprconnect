@@ -1243,6 +1243,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Continue'**
   String get setupContinue;
+
+  /// No description provided for @checkForUpdates.
+  ///
+  /// In en, this message translates to:
+  /// **'Check for updates'**
+  String get checkForUpdates;
+
+  /// No description provided for @updateAvailableTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A new version is available'**
+  String get updateAvailableTitle;
+
+  /// No description provided for @updateDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get updateDownload;
+
+  /// No description provided for @updateInstall.
+  ///
+  /// In en, this message translates to:
+  /// **'Install'**
+  String get updateInstall;
+
+  /// No description provided for @updateLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Later'**
+  String get updateLater;
+
+  /// No description provided for @updateDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading update…'**
+  String get updateDownloading;
+
+  /// No description provided for @updateUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'You are on the latest version.'**
+  String get updateUpToDate;
+
+  /// No description provided for @updateCheckFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not check for updates.'**
+  String get updateCheckFailed;
+
+  /// No description provided for @updateFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The update could not be downloaded.'**
+  String get updateFailed;
+
+  /// No description provided for @updateReady.
+  ///
+  /// In en, this message translates to:
+  /// **'The update is downloaded and ready to install.'**
+  String get updateReady;
+
+  /// No description provided for @updatePermissionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow installs from this app on the settings page that opened, then come back and tap Install again.'**
+  String get updatePermissionHint;
 }
 
 class _AppLocalizationsDelegate

@@ -15,12 +15,14 @@ class AppPrefs extends ChangeNotifier {
   ThemeMode _themeMode;
   final List<String> _manualAddresses;
   bool _setupComplete;
+  int _lastUpdateCheckMillis;
 
   AppPrefs._(
     this._dir,
     this._themeMode,
     this._manualAddresses,
     this._setupComplete,
+    this._lastUpdateCheckMillis,
   );
 
   /// Load from [dir]/app_prefs.json; defaults when the file is
@@ -31,6 +33,7 @@ class AppPrefs extends ChangeNotifier {
     var themeMode = ThemeMode.system;
     var addresses = <String>[];
     var setupComplete = false;
+    var lastUpdateCheckMillis = 0;
     final file = File('${dir.path}/app_prefs.json');
     if (await file.exists()) {
       try {
@@ -46,19 +49,27 @@ class AppPrefs extends ChangeNotifier {
           addresses = raw.whereType<String>().toList();
         }
         setupComplete = json['setupComplete'] as bool? ?? false;
+        lastUpdateCheckMillis =
+            (json['lastUpdateCheckMillis'] as num?)?.toInt() ?? 0;
       } catch (_) {
         // A corrupt prefs file falls back to the defaults; the
         // next change re-creates it.
       }
     }
-    return AppPrefs._(dir, themeMode, addresses, setupComplete);
+    return AppPrefs._(
+      dir,
+      themeMode,
+      addresses,
+      setupComplete,
+      lastUpdateCheckMillis,
+    );
   }
 
   /// In-memory prefs (no persistence), for tests and previews.
   /// The setup gate counts as passed here so test shells are not
   /// blocked by it.
   factory AppPrefs.inMemory({bool setupComplete = true}) =>
-      AppPrefs._(null, ThemeMode.system, <String>[], setupComplete);
+      AppPrefs._(null, ThemeMode.system, <String>[], setupComplete, 0);
 
   ThemeMode get themeMode => _themeMode;
 
@@ -69,6 +80,15 @@ class AppPrefs extends ChangeNotifier {
   /// Whether the first-run setup gate (battery exemption plus
   /// autostart) has been completed on this install.
   bool get setupComplete => _setupComplete;
+
+  /// When the last automatic update check ran (epoch millis), so
+  /// the check can throttle itself to about once a day.
+  int get lastUpdateCheckMillis => _lastUpdateCheckMillis;
+
+  Future<void> markUpdateChecked(int millis) async {
+    _lastUpdateCheckMillis = millis;
+    await _save();
+  }
 
   Future<void> setThemeMode(ThemeMode mode) async {
     if (_themeMode == mode) return;
@@ -111,6 +131,7 @@ class AppPrefs extends ChangeNotifier {
         },
         'manualAddresses': _manualAddresses,
         'setupComplete': _setupComplete,
+        'lastUpdateCheckMillis': _lastUpdateCheckMillis,
       }),
     );
     await tmp.rename(file.path);

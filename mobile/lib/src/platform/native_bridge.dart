@@ -99,4 +99,48 @@ class NativeBridge {
       await _channel.invokeMethod<void>('openNotificationSettings');
     } catch (_) {}
   }
+
+  /// This install's full version as "1.0.0+4" (version name plus
+  /// build number), or null when the bridge is unavailable. The
+  /// update checker compares it against the latest release tag.
+  static Future<String?> appVersion() async {
+    try {
+      return await _channel.invokeMethod<String>('appVersion');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether Android currently lets this app install packages
+  /// (the per-app "install unknown apps" switch). True below
+  /// Android 8, where no such switch exists.
+  static Future<bool> canInstallPackages() async {
+    try {
+      return await _channel.invokeMethod<bool>('canInstallPackages') ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Open the system page where the user allows this app to
+  /// install packages.
+  static Future<void> openInstallPermissionSettings() async {
+    try {
+      await _channel.invokeMethod<void>('openInstallPermissionSettings');
+    } catch (_) {}
+  }
+
+  /// Hand an APK file to the system package installer. Returns
+  /// false when the installer could not be opened.
+  static Future<bool> installApk(String path) async {
+    try {
+      return await _channel.invokeMethod<bool>('installApk', {
+            'path': path,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

@@ -68,9 +68,71 @@ class MainActivity : FlutterActivity() {
                         openNotificationSettings()
                         result.success(null)
                     }
+                    "appVersion" -> {
+                        result.success(appVersion())
+                    }
+                    "canInstallPackages" -> {
+                        result.success(
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                                packageManager.canRequestPackageInstalls(),
+                        )
+                    }
+                    "openInstallPermissionSettings" -> {
+                        try {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:$packageName"),
+                                ),
+                            )
+                        } catch (e: Exception) {
+                            // Fall through: the install intent will
+                            // surface the same page on its own.
+                        }
+                        result.success(null)
+                    }
+                    "installApk" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        result.success(installApk(path))
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /// "1.0.0+4": the version name and build number of this
+    /// install, in the same shape as the release tags.
+    private fun appVersion(): String {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        return "${info.versionName}+$code"
+    }
+
+    /// Open the system installer on a downloaded update APK.
+    private fun installApk(path: String): Boolean {
+        return try {
+            val file = java.io.File(path)
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "$packageName.fileprovider",
+                file,
+            )
+            startActivity(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+                },
+            )
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun pairingNotificationId(deviceId: String): Int = 1000 + deviceId.hashCode() % 10000

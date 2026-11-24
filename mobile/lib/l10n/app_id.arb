@@ -284,5 +284,16 @@
   "setupTitle": "Sebelum mulai",
   "setupIntro": "Dua sakelar sistem menjaga HyprConnect tetap tersambung di latar belakang. Keduanya harus menyala sebelum kamu bisa lanjut.",
   "autostartConfirm": "Saya sudah menyalakan Autostart untuk aplikasi ini",
-  "setupContinue": "Lanjut"
+  "setupContinue": "Lanjut",
+  "checkForUpdates": "Periksa pembaruan",
+  "updateAvailableTitle": "Ada versi baru",
+  "updateDownload": "Unduh",
+  "updateInstall": "Pasang",
+  "updateLater": "Nanti",
+  "updateDownloading": "Mengunduh pembaruan…",
+  "updateReady": "Pembaruan sudah terunduh dan siap dipasang.",
+  "updatePermissionHint": "Izinkan pemasangan dari aplikasi ini di halaman pengaturan yang terbuka, lalu kembali dan ketuk Pasang lagi.",
+  "updateUpToDate": "Kamu sudah memakai versi terbaru.",
+  "updateCheckFailed": "Tidak bisa memeriksa pembaruan.",
+  "updateFailed": "Pembaruan gagal diunduh."
 }

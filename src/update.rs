@@ -43,7 +43,7 @@ pub fn current_tag() -> String {
 pub struct ReleaseInfo {
     pub tag: String,
     pub notes: String,
-    /// Asset name -> (download URL, size in bytes).
+    /// Asset name -> (API URL, size in bytes).
     pub assets: HashMap<String, (String, u64)>,
 }
 
@@ -112,7 +112,43 @@ fn get(url: &str) -> Result<ureq::Response> {
 }
 
 fn download_bytes(url: &str) -> Result<Vec<u8>> {
-    let response = get(url)?;
+    // GitHub serves release assets through the API endpoint,
+    // which answers a redirect to a short-lived signed URL. An
+    // Authorization header must not follow that redirect (the
+    // signed URL rejects it, and the plain download endpoint
+    // 404s for token callers), so the redirect is walked by
+    // hand: first the API URL with our headers, then the signed
+    // URL with none.
+    let no_redirect = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(180))
+        .redirects(0)
+        .build();
+    let mut request = no_redirect
+        .get(url)
+        .set("User-Agent", "HyprConnect-Desktop")
+        .set("Accept", "application/octet-stream");
+    if let Ok(token) = std::env::var("HC_UPDATE_TOKEN") {
+        if !token.is_empty() {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+    }
+    let response = request
+        .call()
+        .map_err(|e| anyhow::anyhow!("update request failed: {e}"))?;
+    if response.status() == 302 {
+        let location = response
+            .header("Location")
+            .context("the asset redirect has no location")?
+            .to_string();
+        let response = agent()
+            .get(&location)
+            .call()
+            .map_err(|e| anyhow::anyhow!("update request failed: {e}"))?;
+        let mut buf = Vec::new();
+        response.into_reader().read_to_end(&mut buf)?;
+        return Ok(buf);
+    }
     let mut buf = Vec::new();
     response.into_reader().read_to_end(&mut buf)?;
     Ok(buf)
@@ -135,10 +171,11 @@ pub fn fetch_latest() -> Result<ReleaseInfo> {
     let mut assets = HashMap::new();
     if let Some(list) = json["assets"].as_array() {
         for asset in list {
-            let (Some(name), Some(url)) = (
-                asset["name"].as_str(),
-                asset["browser_download_url"].as_str(),
-            ) else {
+            // The asset's API URL, not its browser download URL:
+            // downloads go through download_bytes, which walks
+            // the API redirect by hand.
+            let (Some(name), Some(url)) = (asset["name"].as_str(), asset["url"].as_str())
+            else {
                 continue;
             };
             let size = asset["size"].as_u64().unwrap_or(0);

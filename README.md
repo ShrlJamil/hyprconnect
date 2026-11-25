@@ -18,6 +18,22 @@ without pulling in any KDE or Qt stack.
 | --- | --- |
 | <img src="docs/images/screenshot-mobile.jpg" width="260" alt="HyprConnect Android app showing the device menu"> | <img src="docs/images/screenshot-desktop.png" width="620" alt="HyprConnect desktop app showing the device page"> |
 
+## Install
+
+Download `hyprconnect-linux-x86_64.tar.gz` from the
+[latest release](https://github.com/ShrlJamil/hyprconnect/releases/latest),
+unpack it and run the installer. It copies the daemon and the desktop
+app into `~/.local/bin`, installs the systemd user unit, the desktop
+entry and the icon, and starts the daemon:
+
+```sh
+tar -xzf hyprconnect-linux-x86_64.tar.gz
+cd hyprconnect
+./install.sh
+```
+
+The Android app is the `app-release.apk` asset in the same release.
+
 ## Status
 
 Current release is v1.0.0+12. The daemon, the desktop app and the

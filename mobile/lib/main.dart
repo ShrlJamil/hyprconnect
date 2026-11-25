@@ -50,17 +50,8 @@ class HyprConnectApp extends StatelessWidget {
           title: 'HyprConnect',
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-            useMaterial3: true,
-          ),
-          darkTheme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.indigo,
-              brightness: Brightness.dark,
-            ),
-            useMaterial3: true,
-          ),
+          theme: ThemeData(colorScheme: _lightScheme, useMaterial3: true),
+          darkTheme: ThemeData(colorScheme: _darkScheme, useMaterial3: true),
           themeMode: prefs.themeMode,
           home: HomePage(prefs: prefs, appState: appState),
         );
@@ -207,3 +198,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 }
+
+/// App color schemes: solid, neutral surfaces tinted only by the
+/// seed — the blue of the logo mark (#00A8F4).  No gradients in the
+/// UI; the gradient lives in the logo alone.  The surface ladder is
+/// overridden to stay neutral instead of following the seed's tint.
+final _lightScheme = ColorScheme.fromSeed(
+  seedColor: const Color(0xFF00A8F4),
+).copyWith(
+  surface: const Color(0xFFF6F8F9),
+  surfaceContainerLowest: const Color(0xFFFFFFFF),
+  surfaceContainerLow: const Color(0xFFEFF3F5),
+  surfaceContainer: const Color(0xFFE8EDF0),
+  surfaceContainerHigh: const Color(0xFFDFE6EA),
+  surfaceContainerHighest: const Color(0xFFD5DEE3),
+);
+
+final _darkScheme = ColorScheme.fromSeed(
+  seedColor: const Color(0xFF00A8F4),
+  brightness: Brightness.dark,
+).copyWith(
+  surface: const Color(0xFF0E1319),
+  surfaceContainerLowest: const Color(0xFF090D12),
+  surfaceContainerLow: const Color(0xFF10161D),
+  surfaceContainer: const Color(0xFF131A21),
+  surfaceContainerHigh: const Color(0xFF1A232D),
+  surfaceContainerHighest: const Color(0xFF232E3A),
+);

@@ -297,7 +297,7 @@ object NativeBridge {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, PAIRING_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(context.getString(R.string.pairing_notif_title))
             .setContentText(context.getString(R.string.pairing_notif_text, deviceName))
             .setContentIntent(contentIntent)

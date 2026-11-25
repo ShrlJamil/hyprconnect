@@ -32,6 +32,27 @@ class AppLocalizationsId extends AppLocalizations {
   String get accept => 'Terima';
 
   @override
+  String get allDevices => 'Semua peranti';
+
+  @override
+  String get connecting => 'Menghubungkan...';
+
+  @override
+  String get deviceTypeDesktop => 'Desktop';
+
+  @override
+  String get deviceTypeLaptop => 'Laptop';
+
+  @override
+  String get deviceTypePhone => 'Ponsel';
+
+  @override
+  String get deviceTypeTablet => 'Tablet';
+
+  @override
+  String get thisDevice => 'Perangkat ini';
+
+  @override
   String get addSlide => 'Tambah slide';
 
   @override
@@ -181,7 +202,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get noPairedDeviceBody =>
-      'Buka sidebar lalu pilih Sandingkan peranti baru untuk menghubungkan desktop pertamamu.';
+      'Buka sidebar lalu pilih Semua peranti untuk menghubungkan desktop pertamamu.';
 
   @override
   String get noPairedDeviceTitle => 'Belum ada peranti yang disandingkan.';
@@ -208,9 +229,6 @@ class AppLocalizationsId extends AppLocalizations {
   String pairFirst(String device, String title) {
     return 'Pair dulu dengan $device untuk memakai $title.';
   }
-
-  @override
-  String get pairNewDevice => 'Sandingkan peranti baru';
 
   @override
   String get pairingRequest => 'Permintaan pairing';
@@ -384,6 +402,15 @@ class AppLocalizationsId extends AppLocalizations {
       'Pastikan desktop dan HP berada di Wi-Fi yang sama.';
 
   @override
+  String get sectionAvailable => 'Tersedia';
+
+  @override
+  String get sectionConnected => 'Terhubung';
+
+  @override
+  String get sectionNotConnected => 'Tidak terhubung';
+
+  @override
   String get scrollSensitivity => 'Sensitivitas gulir';
 
   @override
@@ -432,10 +459,10 @@ class AppLocalizationsId extends AppLocalizations {
   String get slideNotes => 'Catatan slide';
 
   @override
-  String get statusConnectedPaired => 'Terhubung, paired';
+  String get statusConnectedPaired => 'Terhubung, sudah dipasangkan';
 
   @override
-  String get statusConnectedUnpaired => 'Terhubung, belum dipair';
+  String get statusConnectedUnpaired => 'Terhubung, belum dipasangkan';
 
   @override
   String get statusDiscovered => 'Ditemukan';
@@ -444,7 +471,10 @@ class AppLocalizationsId extends AppLocalizations {
   String get statusOffline => 'Luring';
 
   @override
-  String get statusPairRequestCheckKey => 'Minta pairing, cek kunci';
+  String get statusPaired => 'Sudah dipasangkan';
+
+  @override
+  String get statusPairRequestCheckKey => 'Meminta pairing, cocokkan kuncinya';
 
   @override
   String get stop => 'Berhenti';
@@ -469,9 +499,6 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get textToTypeLabel => 'Teks yang akan diketik di desktop';
-
-  @override
-  String get thisDevice => 'Perangkat ini';
 
   @override
   String get touchpadHint =>

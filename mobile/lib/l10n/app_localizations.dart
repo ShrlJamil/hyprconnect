@@ -140,6 +140,48 @@ abstract class AppLocalizations {
   /// **'Accept'**
   String get accept;
 
+  /// No description provided for @allDevices.
+  ///
+  /// In en, this message translates to:
+  /// **'All devices'**
+  String get allDevices;
+
+  /// No description provided for @connecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting...'**
+  String get connecting;
+
+  /// No description provided for @deviceTypeDesktop.
+  ///
+  /// In en, this message translates to:
+  /// **'Desktop'**
+  String get deviceTypeDesktop;
+
+  /// No description provided for @deviceTypeLaptop.
+  ///
+  /// In en, this message translates to:
+  /// **'Laptop'**
+  String get deviceTypeLaptop;
+
+  /// No description provided for @deviceTypePhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get deviceTypePhone;
+
+  /// No description provided for @deviceTypeTablet.
+  ///
+  /// In en, this message translates to:
+  /// **'Tablet'**
+  String get deviceTypeTablet;
+
+  /// No description provided for @thisDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'This device'**
+  String get thisDevice;
+
   /// No description provided for @addSlide.
   ///
   /// In en, this message translates to:
@@ -413,7 +455,7 @@ abstract class AppLocalizations {
   /// No description provided for @noPairedDeviceBody.
   ///
   /// In en, this message translates to:
-  /// **'Open the sidebar and choose Pair new device to connect your first desktop.'**
+  /// **'Open the sidebar and choose All devices to connect your first desktop.'**
   String get noPairedDeviceBody;
 
   /// No description provided for @noPairedDeviceTitle.
@@ -463,12 +505,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Pair with {device} first to use {title}.'**
   String pairFirst(String device, String title);
-
-  /// No description provided for @pairNewDevice.
-  ///
-  /// In en, this message translates to:
-  /// **'Pair new device'**
-  String get pairNewDevice;
 
   /// No description provided for @pairingRequest.
   ///
@@ -782,6 +818,24 @@ abstract class AppLocalizations {
   /// **'Make sure the desktop and this phone are on the same Wi-Fi.'**
   String get sameWifiHint;
 
+  /// No description provided for @sectionAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get sectionAvailable;
+
+  /// No description provided for @sectionConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected'**
+  String get sectionConnected;
+
+  /// No description provided for @sectionNotConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connected'**
+  String get sectionNotConnected;
+
   /// No description provided for @scrollSensitivity.
   ///
   /// In en, this message translates to:
@@ -902,6 +956,12 @@ abstract class AppLocalizations {
   /// **'Offline'**
   String get statusOffline;
 
+  /// No description provided for @statusPaired.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired'**
+  String get statusPaired;
+
   /// No description provided for @statusPairRequestCheckKey.
   ///
   /// In en, this message translates to:
@@ -955,12 +1015,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Text to type on the desktop'**
   String get textToTypeLabel;
-
-  /// No description provided for @thisDevice.
-  ///
-  /// In en, this message translates to:
-  /// **'This device'**
-  String get thisDevice;
 
   /// No description provided for @touchpadHint.
   ///

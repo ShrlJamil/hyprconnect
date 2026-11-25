@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/l10n.dart';
 import 'about_page.dart';
 import 'app_state.dart';
+import 'fade_page_route.dart';
 import 'pair_new_page.dart';
 import 'settings_page.dart';
 
@@ -79,10 +80,14 @@ class AppDrawer extends StatelessWidget {
 
   void _pushPair(NavigatorState navigator) {
     navigator.push(
-      MaterialPageRoute<void>(
+      FadePageRoute<void>(
         builder: (pageContext) => PairNewPage(
           appState: appState,
           drawer: _subDrawer(pageContext, DrawerActive.pair),
+          onSelectDevice: (deviceId) {
+            navigator.pop();
+            onSelectDevice(deviceId);
+          },
         ),
       ),
     );
@@ -90,7 +95,7 @@ class AppDrawer extends StatelessWidget {
 
   void _pushSettings(NavigatorState navigator) {
     navigator.push(
-      MaterialPageRoute<void>(
+      FadePageRoute<void>(
         builder: (pageContext) => SettingsPage(
           appState: appState,
           drawer: _subDrawer(pageContext, DrawerActive.settings),
@@ -101,7 +106,7 @@ class AppDrawer extends StatelessWidget {
 
   void _pushAbout(NavigatorState navigator) {
     navigator.push(
-      MaterialPageRoute<void>(
+      FadePageRoute<void>(
         builder: (pageContext) =>
             AboutPage(drawer: _subDrawer(pageContext, DrawerActive.about)),
       ),
@@ -160,6 +165,12 @@ class AppDrawer extends StatelessWidget {
         )
         .toList();
     final colorScheme = Theme.of(context).colorScheme;
+    // The device rows carry the pill only while a device page is
+    // the active destination; on pair, settings and about the pill
+    // belongs to that page's own entry instead.
+    final pillDeviceId = active == DrawerActive.device
+        ? selectedDeviceId
+        : null;
     return Drawer(
       child: SafeArea(
         child: ListView(
@@ -176,11 +187,11 @@ class AppDrawer extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'HyprConnect',
+                          identity?.deviceName ?? 'HyprConnect',
                           style: Theme.of(context).textTheme.titleLarge,
                         ),
                         Text(
-                          identity?.deviceName ?? '...',
+                          context.l10n.thisDevice,
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(color: colorScheme.onSurfaceVariant),
                         ),
@@ -204,7 +215,7 @@ class AppDrawer extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
                 child: Material(
-                  color: entry.deviceId == selectedDeviceId
+                  color: entry.deviceId == pillDeviceId
                       ? colorScheme.secondaryContainer
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(24),
@@ -217,7 +228,7 @@ class AppDrawer extends StatelessWidget {
                     title: Text(
                       entry.name.isEmpty ? entry.deviceId : entry.name,
                     ),
-                    selected: entry.deviceId == selectedDeviceId,
+                    selected: entry.deviceId == pillDeviceId,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(24),
                     ),
@@ -230,8 +241,8 @@ class AppDrawer extends StatelessWidget {
               ),
             _destinationTile(
               context,
-              icon: Icons.add_circle_outline,
-              title: context.l10n.pairNewDevice,
+              icon: Icons.devices,
+              title: context.l10n.allDevices,
               isActive: active == DrawerActive.pair,
               override: onOpenPair,
               pushDefault: _pushPair,

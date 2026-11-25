@@ -32,6 +32,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get accept => 'Accept';
 
   @override
+  String get allDevices => 'All devices';
+
+  @override
+  String get connecting => 'Connecting...';
+
+  @override
+  String get deviceTypeDesktop => 'Desktop';
+
+  @override
+  String get deviceTypeLaptop => 'Laptop';
+
+  @override
+  String get deviceTypePhone => 'Phone';
+
+  @override
+  String get deviceTypeTablet => 'Tablet';
+
+  @override
+  String get thisDevice => 'This device';
+
+  @override
   String get addSlide => 'Add slide';
 
   @override
@@ -181,7 +202,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noPairedDeviceBody =>
-      'Open the sidebar and choose Pair new device to connect your first desktop.';
+      'Open the sidebar and choose All devices to connect your first desktop.';
 
   @override
   String get noPairedDeviceTitle => 'No device paired yet.';
@@ -209,9 +230,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String pairFirst(String device, String title) {
     return 'Pair with $device first to use $title.';
   }
-
-  @override
-  String get pairNewDevice => 'Pair new device';
 
   @override
   String get pairingRequest => 'Pairing request';
@@ -388,6 +406,15 @@ class AppLocalizationsEn extends AppLocalizations {
       'Make sure the desktop and this phone are on the same Wi-Fi.';
 
   @override
+  String get sectionAvailable => 'Available';
+
+  @override
+  String get sectionConnected => 'Connected';
+
+  @override
+  String get sectionNotConnected => 'Not connected';
+
+  @override
   String get scrollSensitivity => 'Scroll sensitivity';
 
   @override
@@ -448,6 +475,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusOffline => 'Offline';
 
   @override
+  String get statusPaired => 'Paired';
+
+  @override
   String get statusPairRequestCheckKey => 'Pairing requested, check the key';
 
   @override
@@ -473,9 +503,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get textToTypeLabel => 'Text to type on the desktop';
-
-  @override
-  String get thisDevice => 'This device';
 
   @override
   String get touchpadHint =>

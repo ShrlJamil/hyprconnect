@@ -16,12 +16,28 @@ import 'manual_devices_page.dart';
 class SettingsPage extends StatelessWidget {
   final AppState appState;
 
-  const SettingsPage({super.key, required this.appState});
+  /// The navigation drawer, when reached from it: the page then
+  /// keeps the hamburger instead of a back arrow, like KDE Connect.
+  final Widget? drawer;
+
+  const SettingsPage({super.key, required this.appState, this.drawer});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(context.l10n.settings)),
+      drawer: drawer,
+      appBar: AppBar(
+        leading: drawer == null
+            ? null
+            : Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu),
+                  tooltip: context.l10n.devices,
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+        title: Text(context.l10n.settings),
+      ),
       body: AnimatedBuilder(
         animation: Listenable.merge([appState, appState.prefs]),
         builder: (context, _) {

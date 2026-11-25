@@ -149,6 +149,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         final drawer = AppDrawer(
           appState: _appState,
           selectedDeviceId: selected?.deviceId,
+          active: DrawerActive.device,
           onSelectDevice: (id) => setState(() => _selectedDeviceId = id),
         );
         if (selected == null) {

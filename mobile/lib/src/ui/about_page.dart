@@ -7,12 +7,28 @@ import '../platform/native_bridge.dart';
 import 'update_dialog.dart';
 
 class AboutPage extends StatelessWidget {
-  const AboutPage({super.key});
+  /// The navigation drawer, when reached from it: the page then
+  /// keeps the hamburger instead of a back arrow, like KDE Connect.
+  final Widget? drawer;
+
+  const AboutPage({super.key, this.drawer});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(context.l10n.about)),
+      drawer: drawer,
+      appBar: AppBar(
+        leading: drawer == null
+            ? null
+            : Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu),
+                  tooltip: context.l10n.devices,
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              ),
+        title: Text(context.l10n.about),
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

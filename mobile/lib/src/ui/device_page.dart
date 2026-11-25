@@ -67,6 +67,29 @@ class _DevicePageState extends State<DevicePage> {
   AppState get _appState => widget.appState;
   DeviceListEntry get _entry => widget.entry;
 
+  /// A paired device that is in range connects on its own when its
+  /// page opens; nobody should have to press Connect for a device
+  /// the phone already knows. The attempt runs once per page.
+  bool _autoConnectInFlight = false;
+  bool _autoConnectTried = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoConnect());
+  }
+
+  Future<void> _autoConnect() async {
+    if (!mounted || _autoConnectTried) return;
+    if (!_entry.trusted || !_entry.online) return;
+    final conn = _appState.connectionFor(_entry.deviceId);
+    if (conn != null && conn.isConnected) return;
+    _autoConnectTried = true;
+    setState(() => _autoConnectInFlight = true);
+    await _appState.connectTo(_entry);
+    if (mounted) setState(() => _autoConnectInFlight = false);
+  }
+
   /// Toast-style notice, KDE Connect style: a floating rounded pill
   /// near the bottom of the screen instead of a full-width bar.
   void _snack(String message) {
@@ -399,7 +422,34 @@ class _DevicePageState extends State<DevicePage> {
                   ),
                 ),
               ],
-              if (!connected) ...[
+              if (!connected && _entry.trusted) ...[
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: _autoConnectInFlight
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2.5),
+                          )
+                        : const Icon(Icons.link_off),
+                    title: Text(
+                      _autoConnectInFlight
+                          ? context.l10n.connecting
+                          : _entry.online
+                          ? context.l10n.sectionNotConnected
+                          : context.l10n.deviceOffline,
+                    ),
+                    trailing: _entry.online && !_autoConnectInFlight
+                        ? TextButton(
+                            onPressed: _connect,
+                            child: Text(context.l10n.connect),
+                          )
+                        : null,
+                  ),
+                ),
+              ],
+              if (!connected && !_entry.trusted) ...[
                 const SizedBox(height: 8),
                 FilledButton(
                   onPressed: _entry.online ? _connect : null,

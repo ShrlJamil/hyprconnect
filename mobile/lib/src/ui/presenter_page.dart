@@ -244,7 +244,7 @@ class _PresenterPageState extends State<PresenterPage> {
           return SafeArea(
             child: Column(
               children: [
-                _notesBox(scheme),
+                Expanded(flex: 5, child: _notesBox(scheme)),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                   child: Row(
@@ -293,7 +293,7 @@ class _PresenterPageState extends State<PresenterPage> {
                     ],
                   ),
                 ),
-                Expanded(child: _pointerCard()),
+                Expanded(flex: 4, child: _pointerCard()),
               ],
             ),
           );
@@ -309,7 +309,6 @@ class _PresenterPageState extends State<PresenterPage> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Container(
-        height: 200,
         width: double.infinity,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
@@ -369,7 +368,7 @@ class _PresenterPageState extends State<PresenterPage> {
                     : SingleChildScrollView(
                         child: Text(
                           _slide - 1 < _notes.length ? _notes[_slide - 1] : '',
-                          style: const TextStyle(fontSize: 15, height: 1.35),
+                          style: const TextStyle(fontSize: 17, height: 1.35),
                         ),
                       ),
               ),
@@ -488,7 +487,7 @@ class _PresenterPageState extends State<PresenterPage> {
                     onPointerUp: (_) => _release(),
                     onPointerCancel: (_) => _release(),
                     child: Center(
-                      child: Icon(Icons.gps_fixed, size: 88, color: fg),
+                      child: Icon(Icons.gps_fixed, size: 68, color: fg),
                     ),
                   );
                 },

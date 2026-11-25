@@ -44,8 +44,22 @@ class KeepAliveService : Service() {
                 setReferenceCounted(false)
                 acquire()
             }
+            // Low-latency mode on API 29+: the plain full mode
+            // still lets the radio doze, and the presenter stream
+            // showed what that costs - motion packets held for
+            // ~130 ms and flushed in bursts on a ~200 ms rhythm,
+            // which no amount of desktop smoothing can undo.
+            // Low-latency keeps the radio awake for exactly this
+            // kind of real-time traffic while this foreground
+            // service runs.
+            val wifiMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION")
+                WifiManager.WIFI_MODE_FULL
+            }
             @Suppress("DEPRECATION")
-            wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL, "hyprconnect:connection").apply {
+            wifiLock = wifi.createWifiLock(wifiMode, "hyprconnect:connection").apply {
                 setReferenceCounted(false)
                 acquire()
             }

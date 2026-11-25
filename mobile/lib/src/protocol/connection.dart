@@ -132,6 +132,9 @@ class DeviceConnection {
       tcpPort,
       timeout: const Duration(seconds: 10),
     );
+    // Presenter and mousepad packets are tiny and latency
+    // sensitive; Nagle batching would deliver them in pulses.
+    raw.setOption(SocketOption.tcpNoDelay, true);
     raw.write(_identityPacket().toLine());
     await raw.flush();
     final secure = await SecureSocket.secureServer(
@@ -146,6 +149,7 @@ class DeviceConnection {
   /// Accept a connection the peer opened: read its plaintext identity,
   /// then TLS as the client (SNI names the peer device id).
   Future<void> acceptIncoming(Socket raw) async {
+    raw.setOption(SocketOption.tcpNoDelay, true);
     final line = await _readLine(raw);
     if (line == null) {
       throw const SocketException('peer closed before plaintext identity');

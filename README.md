@@ -1,38 +1,55 @@
+<p align="center">
+  <img src="docs/images/logo.png" width="128" alt="HyprConnect logo">
+</p>
+
 # HyprConnect
 
 Compact KDE Connect-compatible companion for Hyprland, written in Rust.
 
 HyprConnect implements a subset of the KDE Connect protocol in a single
-lightweight daemon, paired with a GTK 4 desktop app. It pairs with the
-official KDE Connect Android app and deliberately leaves out everything
-that is not needed day to day, without pulling in any KDE or Qt stack.
+lightweight daemon, paired with a GTK 4 desktop app and its own Android
+app. It also pairs with the official KDE Connect Android app, and
+deliberately leaves out everything that is not needed day to day,
+without pulling in any KDE or Qt stack.
+
+## Screenshots
+
+| Mobile | Desktop |
+| --- | --- |
+| <img src="docs/images/screenshot-mobile.jpg" width="260" alt="HyprConnect Android app showing the device menu"> | <img src="docs/images/screenshot-desktop.png" width="620" alt="HyprConnect desktop app showing the device page"> |
 
 ## Status
 
-Early development, built in phases. Discovery, TLS transport and
-pairing (phase 0), clipboard sync (phase 1) and file sharing
-(phase 2) and notification mirroring (phase 3) are implemented and
-verified against the official Android app on a real phone. MPRIS,
-SFTP and the presentation remote follow.
+Current release is v1.0.0+12. The daemon, the desktop app and the
+Android app are implemented and in daily use. Discovery, TLS transport
+and pairing, clipboard sync, file sharing in both directions,
+notification mirroring, MPRIS control in both directions, SFTP browsing
+of the phone storage, the presentation remote, remote input and run
+commands all work against the companion Android app, and the core
+features are verified against the official KDE Connect Android app on
+a real phone.
 
-## Planned features
+## Features
 
-- Presentation remote, carried over from HyprPresenter
 - File sharing, send and receive
 - Clipboard sharing between phone and desktop
 - Notification sharing from phone to desktop
 - MPRIS sharing, control desktop players from the phone and the other way round
 - SFTP mount of the phone storage for any file manager
+- Presentation remote with a laser pointer overlay, carried over from HyprPresenter
+- Remote input, touchpad and keyboard from the phone
+- Run commands on the desktop from the phone
+- Find device, battery status and in-app updates
 
 ## Not planned
 
-SMS, telephony, remote command execution, and full remote input are out
-of scope by design.
+SMS and telephony are out of scope by design.
 
 ## Tech
 
 - Rust daemon: tokio, rustls, zbus (D-Bus), Wayland clipboard protocols
 - GTK 4 desktop app
+- Flutter Android app
 - KDE Connect protocol subset: UDP discovery, TLS with per-device
   certificates, JSON packets
 

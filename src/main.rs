@@ -556,8 +556,14 @@ impl Daemon {
                         .unwrap_or(false)
                 };
                 if paired {
-                    self.handle_systemvolume_request(device_id, &packet)
-                        .await;
+                    // Off the read loop: D-Bus work (see the
+                    // notification arm).
+                    let d = self.clone();
+                    let id = device_id.to_string();
+                    let p = packet.clone();
+                    tokio::spawn(async move {
+                        d.handle_systemvolume_request(&id, &p).await;
+                    });
                 }
             }
             "kdeconnect.mpris.request" => {
@@ -570,7 +576,14 @@ impl Daemon {
                         .unwrap_or(false)
                 };
                 if paired {
-                    self.handle_mpris_request(device_id, &packet).await;
+                    // Off the read loop: D-Bus work (see the
+                    // notification arm).
+                    let d = self.clone();
+                    let id = device_id.to_string();
+                    let p = packet.clone();
+                    tokio::spawn(async move {
+                        d.handle_mpris_request(&id, &p).await;
+                    });
                 }
             }
             "kdeconnect.mpris" => {
@@ -650,7 +663,16 @@ impl Daemon {
                         .unwrap_or(false)
                 };
                 if paired {
-                    self.handle_notification(device_id, &packet).await;
+                    // Off the read loop: showing a notification does
+                    // D-Bus calls and may fetch an icon payload, and
+                    // none of that may queue presenter or mousepad
+                    // packets behind it on this connection.
+                    let d = self.clone();
+                    let id = device_id.to_string();
+                    let p = packet.clone();
+                    tokio::spawn(async move {
+                        d.handle_notification(&id, &p).await;
+                    });
                 }
             }
             "kdeconnect.share.request" => {
@@ -663,7 +685,14 @@ impl Daemon {
                         .unwrap_or(false)
                 };
                 if paired {
-                    self.handle_share_request(device_id, &packet).await;
+                    // Off the read loop: receiving a share opens a
+                    // payload connection and writes a file.
+                    let d = self.clone();
+                    let id = device_id.to_string();
+                    let p = packet.clone();
+                    tokio::spawn(async move {
+                        d.handle_share_request(&id, &p).await;
+                    });
                 }
             }
             "kdeconnect.clipboard" | "kdeconnect.clipboard.connect" => {
@@ -679,7 +708,14 @@ impl Daemon {
                     if let Some(content) =
                         packet.body.get("content").and_then(|c| c.as_str())
                     {
-                        self.apply_remote_clipboard(content).await;
+                        // Off the read loop: applying a clipboard
+                        // does Wayland round trips that must not
+                        // queue latency-sensitive packets behind it.
+                        let d = self.clone();
+                        let c = content.to_string();
+                        tokio::spawn(async move {
+                            d.apply_remote_clipboard(&c).await;
+                        });
                     }
                 }
             }
@@ -2727,6 +2763,9 @@ async fn connect_to(daemon: Arc<Daemon>, device_id: String, ip: IpAddr, port: u1
         .await
         .context("TCP connect timed out")?
         .context("TCP connect")?;
+        // Small latency-sensitive packets (presenter, mousepad) must
+        // not wait on Nagle batching.
+        let _ = tcp.set_nodelay(true);
         set_keepalive(&tcp);
         // We opened the TCP connection: send our identity in plaintext
         // first, then act as the TLS server.
@@ -3389,6 +3428,7 @@ async fn run_daemon() -> Result<()> {
 
     loop {
         let (tcp, remote) = listener.accept().await?;
+        let _ = tcp.set_nodelay(true);
         let d = daemon.clone();
         tokio::spawn(async move { handle_incoming(d, tcp, remote).await });
     }
@@ -4238,12 +4278,38 @@ impl Daemon {
     }
 }
 
-/// One axis of HyprPresenter-style pointer easing: close half of
-/// the remaining distance to the target per tick, snapping the
-/// final sub-`snap` remainder so the dot settles exactly on the
-/// target instead of creeping toward it forever.
-fn ease_axis(current: f64, target: f64, snap: f64) -> f64 {
-    let next = current + (target - current) * 0.5;
+/// Share of the remaining distance the pointer easing closes per
+/// tick. The loop ticks every 8 ms, so 0.18 gives a glide with a
+/// ~40 ms time constant: quick enough to feel direct, soft enough
+/// that bursty packets stop reading as steps.
+const PRESENTER_EASE: f64 = 0.18;
+
+/// One axis of HyprPresenter-style pointer easing: close
+/// [PRESENTER_EASE] of the remaining distance to the target per
+/// tick, snapping the final sub-`snap` remainder so the dot
+/// settles exactly on the target instead of creeping toward it
+/// forever.
+/// Presenter packet arrival logging for motion diagnosis; on
+/// only when HC_PRESENTER_DEBUG is set in the daemon's
+/// environment, so a test session can be replayed from the journal
+/// with arrival times and delta sizes.
+fn presenter_debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("HC_PRESENTER_DEBUG").is_some())
+}
+
+/// Easing share for a given pixel gap: [PRESENTER_EASE] while the
+/// dot is close to its target, for soft fine motion, rising to 0.5
+/// once it is about 160 px behind, so after a network or handler
+/// hiccup it catches up within a few ticks instead of gliding in
+/// late behind the hand.
+fn ease_factor(gap_px: f64) -> f64 {
+    let t = ((gap_px - 2.0) / 158.0).clamp(0.0, 1.0);
+    PRESENTER_EASE + (0.5 - PRESENTER_EASE) * t
+}
+
+fn ease_axis(current: f64, target: f64, snap: f64, factor: f64) -> f64 {
+    let next = current + (target - current) * factor;
     if (target - next).abs() <= snap {
         target
     } else {
@@ -4262,9 +4328,9 @@ struct PresenterState {
     fx: f64,
     fy: f64,
     /// Position actually shown on screen. The pointer loop eases
-    /// this toward the target HyprPresenter-style (half the
-    /// remaining distance per 20 ms tick) so bursty delta packets
-    /// glide instead of teleporting the dot in chunks.
+    /// this toward the target HyprPresenter-style (a fixed share
+    /// of the remaining distance per 8 ms tick) so bursty delta
+    /// packets glide instead of teleporting the dot in chunks.
     out_x: f64,
     out_y: f64,
     /// Session monitor size in pixels; the easing snaps to the
@@ -4666,6 +4732,9 @@ impl Daemon {
             ));
             return;
         };
+        if presenter_debug() {
+            log(&format!("presenter pkt dx={dx:.5} dy={dy:.5}"));
+        }
         let start = {
             let mut inner = self.inner.lock().await;
             inner.presenter.acc_x += dx;
@@ -4724,7 +4793,7 @@ impl Daemon {
     /// (there is no backlog of stale positions to crawl through).
     async fn presenter_pointer_loop(self: Arc<Self>) {
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(8)).await;
             let mut timed_out = false;
             let step = {
                 let mut inner = self.inner.lock().await;
@@ -4757,8 +4826,21 @@ impl Daemon {
                     } else {
                         0.5 / 1080.0
                     };
-                    let nx = ease_axis(p.out_x, p.fx, snap_x);
-                    let ny = ease_axis(p.out_y, p.fy, snap_y);
+                    let gap_px = ((p.fx - p.out_x).abs()
+                        * if p.mon_w > 0 {
+                            p.mon_w as f64
+                        } else {
+                            1920.0
+                        })
+                        .max((p.fy - p.out_y).abs()
+                            * if p.mon_h > 0 {
+                                p.mon_h as f64
+                            } else {
+                                1080.0
+                            });
+                    let factor = ease_factor(gap_px);
+                    let nx = ease_axis(p.out_x, p.fx, snap_x, factor);
+                    let ny = ease_axis(p.out_y, p.fy, snap_y, factor);
                     if nx != p.out_x || ny != p.out_y {
                         p.out_x = nx;
                         p.out_y = ny;
@@ -4785,21 +4867,31 @@ impl Daemon {
 
 #[cfg(test)]
 mod presenter_ease_tests {
-    use super::ease_axis;
+    use super::{ease_axis, ease_factor, PRESENTER_EASE};
 
     #[test]
-    fn halves_the_remaining_gap_each_tick() {
-        assert_eq!(ease_axis(0.0, 1.0, 0.0), 0.5);
-        assert_eq!(ease_axis(0.5, 1.0, 0.0), 0.75);
-        assert_eq!(ease_axis(1.0, 0.0, 0.0), 0.5);
+    fn closes_a_fixed_share_of_the_gap_each_tick() {
+        // PRESENTER_EASE is 0.18: each tick closes 18% of the gap.
+        assert!((ease_axis(0.0, 1.0, 0.0, PRESENTER_EASE) - 0.18).abs() < 1e-12);
+        assert!((ease_axis(0.5, 1.0, 0.0, PRESENTER_EASE) - 0.59).abs() < 1e-12);
+        assert!((ease_axis(1.0, 0.0, 0.0, PRESENTER_EASE) - 0.82).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ease_factor_stays_soft_up_close_and_catches_up_when_far() {
+        assert!((ease_factor(0.0) - PRESENTER_EASE).abs() < 1e-12);
+        assert!((ease_factor(2.0) - PRESENTER_EASE).abs() < 1e-12);
+        assert!((ease_factor(500.0) - 0.5).abs() < 1e-12);
+        let mid = ease_factor(81.0);
+        assert!(mid > PRESENTER_EASE && mid < 0.5);
     }
 
     #[test]
     fn snaps_the_final_subpixel_step() {
-        // next would be 0.95, remaining 0.05 <= snap 0.2 -> exact target.
-        assert_eq!(ease_axis(0.9, 1.0, 0.2), 1.0);
+        // next would be 0.918, remaining 0.082 <= snap 0.2 -> target.
+        assert_eq!(ease_axis(0.9, 1.0, 0.2, PRESENTER_EASE), 1.0);
         // Already on target: stays exactly, so the loop stops emitting.
-        assert_eq!(ease_axis(0.5, 0.5, 0.001), 0.5);
+        assert_eq!(ease_axis(0.5, 0.5, 0.001, PRESENTER_EASE), 0.5);
     }
 
     #[test]
@@ -4807,21 +4899,29 @@ mod presenter_ease_tests {
         // One burst moves the target 0.2 -> 0.8 at once (what a packet
         // burst did to the shown position before easing). The shown
         // position must now approach monotonically, never overshoot,
-        // with strictly shrinking steps, and settle exactly on target.
+        // with strictly shrinking eased steps, and settle exactly on
+        // target via a final snap that stays sub-pixel.
         let snap = 0.5 / 1920.0;
         let mut pos = 0.2;
         let mut prev_step = f64::INFINITY;
         let mut steps = 0;
         while pos != 0.8 {
-            let next = ease_axis(pos, 0.8, snap);
+            let next = ease_axis(pos, 0.8, snap, PRESENTER_EASE);
             assert!(next > pos && next <= 0.8, "monotonic, no overshoot");
             let step = next - pos;
-            assert!(step < prev_step, "steps shrink as it glides");
+            if next == 0.8 {
+                // The snap covers the whole remaining gap at once;
+                // that gap is at most snap / (1 - PRESENTER_EASE),
+                // so the settle jump stays sub-pixel.
+                assert!(step <= snap * 1.25, "snap step stays sub-pixel");
+            } else {
+                assert!(step < prev_step, "steps shrink as it glides");
+            }
             prev_step = step;
             pos = next;
             steps += 1;
-            assert!(steps < 40, "settles quickly");
+            assert!(steps < 80, "settles quickly");
         }
-        assert!(steps >= 8, "a burst spreads over many ticks, got {steps}");
+        assert!(steps >= 20, "a burst spreads over many ticks, got {steps}");
     }
 }

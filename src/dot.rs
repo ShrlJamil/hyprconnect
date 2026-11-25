@@ -3,7 +3,7 @@
 //! presenter renders it (a fullscreen transparent overlay with the
 //! dot at a fractional position), instead of moving the system
 //! cursor. The dot follows upstream's look: red fill, thin white
-//! border, about 80% opacity, diameter near width/150.
+//! border, about 80% opacity, diameter near width/75.
 
 use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 use std::sync::Arc;
@@ -524,11 +524,12 @@ fn draw_current(state: &mut DotState, _qh: &QueueHandle<DotState>) {
     let (bw, bh) = (lw * scale, lh * scale);
     let cx = (fx * bw as f64) as i32;
     let cy = (fy * bh as f64) as i32;
-    let r = ((bw as f64 / 300.0).round() as i32).max(5);
+    let r = ((bw as f64 / 150.0).round() as i32).max(10);
     let frame_bytes = (bw * bh * 4) as usize;
     let base = unsafe { shown.mem.add(slot_idx * frame_bytes) } as *mut u32;
     let slot = &mut shown.slots[slot_idx];
-    if let Some((ox, oy)) = slot.drawn {
+    let prev = slot.drawn;
+    if let Some((ox, oy)) = prev {
         clear_rect(base, bw, bh, ox, oy, r + 2);
     }
     draw_dot(base, bw, bh, cx, cy, r);
@@ -537,15 +538,43 @@ fn draw_current(state: &mut DotState, _qh: &QueueHandle<DotState>) {
     shown.redraw_pending = false;
     let buffer = slot.buffer.clone();
     shown.surface.attach(Some(&buffer), 0, 0);
+    // Damage only the union of the rect this buffer held before and
+    // the one it holds now. The compositor otherwise re-uploads a
+    // fullscreen frame for a dot a few dozen pixels wide, which
+    // costs more than drawing the dot and shows up as judder.
+    let ext = r + 2;
+    let (dx0, dy0, dx1, dy1) = match prev {
+        Some((ox, oy)) => (
+            (ox - ext).min(cx - ext),
+            (oy - ext).min(cy - ext),
+            (ox + ext).max(cx + ext),
+            (oy + ext).max(cy + ext),
+        ),
+        None => (cx - ext, cy - ext, cx + ext, cy + ext),
+    };
+    let dx0 = dx0.clamp(0, bw as i32);
+    let dy0 = dy0.clamp(0, bh as i32);
+    let dx1 = dx1.clamp(0, bw as i32);
+    let dy1 = dy1.clamp(0, bh as i32);
     if shown.surface.version() >= 4 {
-        shown.surface.damage_buffer(0, 0, bw as i32, bh as i32);
+        shown.surface
+            .damage_buffer(dx0, dy0, dx1 - dx0, dy1 - dy0);
     } else {
-        shown.surface.damage(0, 0, lw as i32, lh as i32);
+        let s = scale as i32;
+        shown.surface.damage(
+            dx0 / s,
+            dy0 / s,
+            (dx1 - dx0) / s + 1,
+            (dy1 - dy0) / s + 1,
+        );
     }
     shown.surface.commit();
 }
 
-fn apply_cmd(state: &mut DotState, qh: &QueueHandle<DotState>, cmd: DotCmd) {
+/// Applies one command; returns true when a Move landed and the
+/// caller should draw once for the whole drained batch, so a burst
+/// of moves costs one draw instead of one draw per packet.
+fn apply_cmd(state: &mut DotState, qh: &QueueHandle<DotState>, cmd: DotCmd) -> bool {
     match cmd {
         DotCmd::Show { output } => {
             let same = matches!(&state.shown, Some(s) if s.output_name == output);
@@ -553,16 +582,16 @@ fn apply_cmd(state: &mut DotState, qh: &QueueHandle<DotState>, cmd: DotCmd) {
                 destroy_shown(state);
                 create_shown(state, qh, &output);
             }
+            false
         }
         DotCmd::Move { x, y } => {
             state.fx = x;
             state.fy = y;
-            if state.shown.is_some() {
-                draw_current(state, qh);
-            }
+            true
         }
         DotCmd::Hide => {
             destroy_shown(state);
+            false
         }
     }
 }
@@ -592,8 +621,12 @@ fn run(
     log("presenter dot overlay ready (layer-shell)");
     let conn_fd = conn.as_fd();
     loop {
+        let mut moved = false;
         while let Ok(cmd) = cmd_rx.try_recv() {
-            apply_cmd(&mut state, &qh, cmd);
+            moved |= apply_cmd(&mut state, &qh, cmd);
+        }
+        if moved && state.shown.is_some() {
+            draw_current(&mut state, &qh);
         }
         queue.dispatch_pending(&mut state)?;
         conn.flush()?;

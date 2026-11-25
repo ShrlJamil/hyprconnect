@@ -69,6 +69,36 @@ class NativeBridge {
     } catch (_) {}
   }
 
+  /// Callback for volume-key presses while presenter routing is
+  /// on: 'up' or 'down'. Owned by the presentation remote page,
+  /// which sets it while it is open and clears it on the way out.
+  static void Function(String key)? onPresenterVolumeKey;
+
+  static bool _handlerRegistered = false;
+
+  static void _ensureHandler() {
+    if (_handlerRegistered) return;
+    _handlerRegistered = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'presenterVolumeKey') {
+        onPresenterVolumeKey?.call(call.arguments as String? ?? '');
+      }
+      return null;
+    });
+  }
+
+  /// While [enabled], the activity consumes the volume keys (the
+  /// system volume does not change and no volume panel appears)
+  /// and reports each press through [onPresenterVolumeKey].
+  static Future<void> setPresenterVolumeKeys(bool enabled) async {
+    _ensureHandler();
+    try {
+      await _channel.invokeMethod<void>('setPresenterVolumeKeys', {
+        'enabled': enabled,
+      });
+    } catch (_) {}
+  }
+
   /// True when the system already lets the app run without battery
   /// restrictions; false elsewhere (and on any error).
   static Future<bool> isIgnoringBatteryOptimizations() async {
@@ -116,8 +146,7 @@ class NativeBridge {
   /// Android 8, where no such switch exists.
   static Future<bool> canInstallPackages() async {
     try {
-      return await _channel.invokeMethod<bool>('canInstallPackages') ??
-          false;
+      return await _channel.invokeMethod<bool>('canInstallPackages') ?? false;
     } catch (_) {
       return false;
     }
@@ -135,9 +164,7 @@ class NativeBridge {
   /// false when the installer could not be opened.
   static Future<bool> installApk(String path) async {
     try {
-      return await _channel.invokeMethod<bool>('installApk', {
-            'path': path,
-          }) ??
+      return await _channel.invokeMethod<bool>('installApk', {'path': path}) ??
           false;
     } catch (_) {
       return false;
@@ -183,8 +210,7 @@ class NativeBridge {
   /// exist as a separate grant.
   static Future<bool> hasAllFilesAccess() async {
     try {
-      return await _channel.invokeMethod<bool>('hasAllFilesAccess') ??
-          false;
+      return await _channel.invokeMethod<bool>('hasAllFilesAccess') ?? false;
     } catch (_) {
       return false;
     }

@@ -32,9 +32,26 @@ object NativeBridge {
     const val CHANNEL = "io.github.shrljamil.hyprconnect/native"
     private const val PAIRING_CHANNEL_ID = "pairing"
 
+    @Volatile
+    private var channel: MethodChannel? = null
+
+    /// True while the presentation remote is on screen: the
+    /// activity then consumes the volume keys and forwards them
+    /// here instead of letting them change the system volume.
+    @Volatile
+    var presenterVolumeKeys: Boolean = false
+
+    /// Forward one volume-key press to the Dart side. Called from
+    /// MainActivity's key handling, on the main thread.
+    fun onPresenterVolumeKey(up: Boolean) {
+        channel?.invokeMethod("presenterVolumeKey", if (up) "up" else "down")
+    }
+
     fun register(engine: FlutterEngine, context: Context) {
         val app = context.applicationContext
-        MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
+        val methodChannel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
+        channel = methodChannel
+        methodChannel
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "startKeepAlive" -> {
@@ -99,6 +116,10 @@ object NativeBridge {
                     "installApk" -> {
                         val path = call.argument<String>("path") ?: ""
                         result.success(installApk(app, path))
+                    }
+                    "setPresenterVolumeKeys" -> {
+                        presenterVolumeKeys = call.argument<Boolean>("enabled") ?: false
+                        result.success(null)
                     }
                     "batteryStatus" -> {
                         result.success(batteryStatus(app))

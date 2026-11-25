@@ -3,6 +3,7 @@ package io.github.shrljamil.hyprconnect_mobile
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -26,6 +27,36 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
         }
+    }
+
+    /// While the presentation remote is open it claims the
+    /// volume keys as Previous / Next: the presses are consumed
+    /// here (the system volume never changes, no volume panel
+    /// appears) and forwarded to the Dart side. A held key only
+    /// fires once, so one press never skips several slides.
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (NativeBridge.presenterVolumeKeys &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+                keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            if (event.repeatCount == 0) {
+                NativeBridge.onPresenterVolumeKey(
+                    keyCode == KeyEvent.KEYCODE_VOLUME_UP,
+                )
+            }
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (NativeBridge.presenterVolumeKeys &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+                keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)
+        ) {
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
     }
 
     override fun getCachedEngineId(): String = EngineHost.ENGINE_ID

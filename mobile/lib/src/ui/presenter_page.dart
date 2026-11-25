@@ -26,6 +26,7 @@ import '../../l10n/l10n.dart';
 
 import 'package:sensors_plus/sensors_plus.dart';
 
+import '../platform/native_bridge.dart';
 import '../protocol/protocol.dart';
 import 'app_state.dart';
 import 'notes_editor_page.dart';
@@ -83,10 +84,24 @@ class _PresenterPageState extends State<PresenterPage> {
     _notes = parseSlideNotes(_appState.presenterNotesFor(_entry.deviceId));
     _appState.requestPresenterMonitors(_entry.deviceId);
     _subscribeGyro();
+    // The hardware volume keys act as Previous / Next while this
+    // page is open; the native side consumes them, so the system
+    // volume stays untouched and no volume panel appears.
+    NativeBridge.onPresenterVolumeKey = (key) {
+      if (!mounted) return;
+      if (key == 'up') {
+        _goNext();
+      } else if (key == 'down') {
+        _goPrevious();
+      }
+    };
+    unawaited(NativeBridge.setPresenterVolumeKeys(true));
   }
 
   @override
   void dispose() {
+    NativeBridge.onPresenterVolumeKey = null;
+    unawaited(NativeBridge.setPresenterVolumeKeys(false));
     _gyroSub?.cancel();
     if (_pointerActive) {
       unawaited(_appState.stopPresenter(_entry.deviceId));
